@@ -1529,12 +1529,15 @@ code, no replacement API is provided.
 ### DEP0074: REPLServer.bufferedCommand
 <!-- YAML
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/???????????????????????
+    description: Runtime deprecation.
   - version: v9.0.0
     pr-url: https://github.com/nodejs/node/pull/13687
-    description: Runtime deprecation.
+    description: End-of-life deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
 The `REPLServer.bufferedCommand` property was deprecated in favor of
 [`REPLServer.clearBufferedCommand()`][].
@@ -1543,12 +1546,15 @@ The `REPLServer.bufferedCommand` property was deprecated in favor of
 ### DEP0075: REPLServer.parseREPLKeyword()
 <!-- YAML
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/??????????????????????
+    description: Runtime deprecation.
   - version: v9.0.0
     pr-url: https://github.com/nodejs/node/pull/14223
     description: Runtime deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
 `REPLServer.parseREPLKeyword()` was removed from userland visibility.
 
@@ -1604,12 +1610,15 @@ supported API.
 ### DEP0078: REPLServer.turnOffEditorMode()
 <!-- YAML
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/?????????????????
+    description: Runtime deprecation.
   - version: v9.0.0
     pr-url: https://github.com/nodejs/node/pull/15136
     description: Runtime deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
 `REPLServer.turnOffEditorMode()` was removed from userland visibility.
 
@@ -1669,12 +1678,15 @@ file descriptors.
 ### DEP0082: REPLServer.prototype.memory()
 <!-- YAML
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/?????????????????????
+    description: Runtime deprecation.
   - version: v9.0.0
     pr-url: https://github.com/nodejs/node/pull/16242
     description: Runtime deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
 `REPLServer.prototype.memory()` is only necessary for the internal mechanics of
 the `REPLServer` itself. Do not use this function.
@@ -2367,12 +2379,15 @@ Setting the TLS ServerName to an IP address is not permitted by
 ### DEP0124: using REPLServer.rli
 <!-- YAML
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/?????????????????????
+    description: Runtime deprecation.
   - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26260
     description: Runtime deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
 This property is a reference to the instance itself.
 

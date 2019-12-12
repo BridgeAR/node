@@ -25,12 +25,6 @@ const ArrayStream = require('../common/arraystream');
 const assert = require('assert');
 const repl = require('repl');
 
-common.expectWarning({
-  DeprecationWarning: {
-    DEP0124: 'REPLServer.rli is deprecated'
-  }
-});
-
 // Create a dummy stream that does nothing
 const stream = new ArrayStream();
 
@@ -51,14 +45,6 @@ assert.strictEqual(r1.useGlobal, false);
 assert.strictEqual(r1.ignoreUndefined, false);
 assert.strictEqual(r1.replMode, repl.REPL_MODE_SLOPPY);
 assert.strictEqual(r1.historySize, 30);
-
-// Test r1 for backwards compact
-assert.strictEqual(r1.rli.input, stream);
-assert.strictEqual(r1.rli.output, stream);
-assert.strictEqual(r1.rli.input, r1.inputStream);
-assert.strictEqual(r1.rli.output, r1.outputStream);
-assert.strictEqual(r1.rli.terminal, true);
-assert.strictEqual(r1.useColors, r1.rli.terminal);
 
 // 2
 function writer() {}
@@ -88,12 +74,6 @@ assert.strictEqual(r2.writer, writer);
 assert.strictEqual(r2.replMode, repl.REPL_MODE_STRICT);
 assert.strictEqual(r2.historySize, 50);
 
-// Test r2 for backwards compact
-assert.strictEqual(r2.rli.input, stream);
-assert.strictEqual(r2.rli.output, stream);
-assert.strictEqual(r2.rli.input, r2.inputStream);
-assert.strictEqual(r2.rli.output, r2.outputStream);
-assert.strictEqual(r2.rli.terminal, false);
 
 // 3, breakEvalOnSigint and eval supplied together should cause a throw
 const r3 = () => repl.start({
