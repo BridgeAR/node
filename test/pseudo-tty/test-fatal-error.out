@@ -3,7 +3,7 @@ throw err;
 ^
 
 TypeError: foobar
-    at Object.<anonymous> (*test-fatal-error.js:*)
+    at Object.<anonymous> [90m(*test-fatal-error.js:*[90m)[39m
 *[90m    at *(node:internal*loader:*:*)*[39m
 *[90m    at *(node:internal*loader:*:*)*[39m
 *[90m    at *(node:internal*loader:*:*)*[39m

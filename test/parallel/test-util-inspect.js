@@ -2742,22 +2742,28 @@ assert.strictEqual(
     // This file is not an actual Node.js core file.
     '    at Module.require [as weird/name] (node:internal/aaaaa/loader:735:19)',
     '    at require (node:internal/modules/cjs/helpers:14:16)',
+    '    at Array.forEach (<anonymous>)',
+    // TODO: Make sure the slashes are correct on Windows and Unix!
+    `    at ${process.cwd()}/test/parallel/test-util-inspect.js:2760:12`,
+    `    at Object.<anonymous> (${process.cwd()}/node_modules/hyper_module/folder/file.js:2753:10)`,
     '    at /test/test-util-inspect.js:2239:9',
     '    at getActual (node:assert:592:5)',
-  ];
-  const isNodeCoreFile = [
-    false, false, true, true, false, true, false, true, false, true,
   ];
   const err = new TypeError('Wonderful message!');
   err.stack = stack.join('\n');
   util.inspect(err, { colors: true }).split('\n').forEach((line, i) => {
-    let actual = stack[i].replace(/node_modules\/([a-z]+)/g, (a, m) => {
+    let expected = stack[i].replace(/node_modules\/([^/]+)/gi, (_, m) => {
       return `node_modules/\u001b[4m${m}\u001b[24m`;
+    }).replaceAll(new RegExp(`(\\(?${process.cwd()})`, 'gi'), (_, m) => {
+      return `\x1B[90m${m}\x1B[39m`;
     });
-    if (isNodeCoreFile[i]) {
-      actual = `\u001b[90m${actual}\u001b[39m`;
+    if (expected.includes(process.cwd()) && expected.endsWith(')')) {
+      expected = `${expected.slice(0, -1)}\x1B[90m)\x1B[39m`;
     }
-    assert.strictEqual(actual, line);
+    if (line.includes('node:') && !line.includes('foo') && !line.includes('aaaaa')) {
+      expected = `\u001b[90m${expected}\u001b[39m`;
+    }
+    assert.strictEqual(line, expected);
   });
 }
 
