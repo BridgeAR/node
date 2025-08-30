@@ -1401,9 +1401,10 @@ if (typeof Symbol !== 'undefined') {
 {
   class ObjectSubclass {}
   class ArraySubclass extends Array {}
-  class SetSubclass extends Set {}
+  class SubclassSet extends Set {}
+  class ListType extends Set {}
   class MapSubclass extends Map {}
-  class PromiseSubclass extends Promise {}
+  class APromiseSubclass extends Promise {}
   class SymbolNameClass {
     static name = Symbol('name');
   }
@@ -1414,14 +1415,16 @@ if (typeof Symbol !== 'undefined') {
                      'ObjectSubclass { foo: 42 }');
   assert.strictEqual(util.inspect(new ArraySubclass(1, 2, 3)),
                      'ArraySubclass(3) [ 1, 2, 3 ]');
-  assert.strictEqual(util.inspect(new SetSubclass([1, 2, 3])),
-                     'SetSubclass(3) [Set] { 1, 2, 3 }');
+  assert.strictEqual(util.inspect(new SubclassSet([1, 2, 3])),
+                     'SubclassSet(3) { 1, 2, 3 }');
   assert.strictEqual(util.inspect(new MapSubclass([['foo', 42]])),
-                     "MapSubclass(1) [Map] { 'foo' => 42 }");
-  assert.strictEqual(util.inspect(new PromiseSubclass(() => {})),
-                     'PromiseSubclass [Promise] { <pending> }');
+                     "MapSubclass(1) { 'foo' => 42 }");
+  assert.strictEqual(util.inspect(new APromiseSubclass(() => {})),
+                     'APromiseSubclass { <pending> }');
   assert.strictEqual(util.inspect(new SymbolNameClass()),
                      'Symbol(name) {}');
+  assert.strictEqual(util.inspect(new ListType([1, 2, 3])),
+                    'ListType(3) [Set] { 1, 2, 3 }');
   assert.strictEqual(
     util.inspect({ a: { b: new ArraySubclass([1, [2], 3]) } }, { depth: 1 }),
     '{ a: { b: [ArraySubclass] } }'
