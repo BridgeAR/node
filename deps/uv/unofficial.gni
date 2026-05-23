@@ -1,9 +1,3 @@
-# Copyright (c) 2013-2019 GitHub Inc.
-# Copyright 2019 the V8 project authors. All rights reserved.
-# Copyright 2023 Microsoft Inc.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
-
 # This file is used by GN for building, which is NOT the build system used for
 # building official binaries.
 # Please edit the gyp files if you are making changes to build system.
@@ -13,6 +7,11 @@
 template("uv_gn_build") {
   config("uv_external_config") {
     include_dirs = [ "include" ]
+    if (is_clang || !is_win) {
+      cflags_cc = [
+        "-Wno-deprecated-pragma",  # for using ENODATA in errno.h
+      ]
+    }
   }
 
   config("uv_internal_config") {
@@ -46,10 +45,12 @@ template("uv_gn_build") {
         "-Wno-extra-semi",
         "-Wno-implicit-fallthrough",
         "-Wno-missing-braces",
+        "-Wno-sign-compare",
         "-Wno-string-conversion",
         "-Wno-shadow",
         "-Wno-unreachable-code",
         "-Wno-unreachable-code-return",
+        "-Wno-unused-but-set-parameter",
         "-Wno-unused-but-set-variable",
         "-Wno-unused-function",
         "-Wno-unused-result",
@@ -69,6 +70,11 @@ template("uv_gn_build") {
     configs += [ ":uv_internal_config" ]
     public_configs = [ ":uv_external_config" ]
 
+    if (is_posix) {
+      configs -= [ "//build/config/gcc:symbol_visibility_hidden" ]
+      configs += [ "//build/config/gcc:symbol_visibility_default" ]
+    }
+
     if (is_win) {
       libs = [
         "advapi32.lib",
@@ -81,11 +87,11 @@ template("uv_gn_build") {
       ]
     }
     if (is_posix) {
-      libs = [ "m" ]
       ldflags = [ "-pthread" ]
     }
     if (is_linux) {
-      libs += [
+      libs = [
+        "m",
         "dl",
         "rt",
       ]

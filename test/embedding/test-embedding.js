@@ -4,27 +4,20 @@ const fixtures = require('../common/fixtures');
 const tmpdir = require('../common/tmpdir');
 const assert = require('assert');
 const {
+  spawnSyncAndAssert,
   spawnSyncAndExit,
   spawnSyncAndExitWithoutError,
 } = require('../common/child_process');
-const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 tmpdir.refresh();
 common.allowGlobals(global.require);
 common.allowGlobals(global.embedVars);
 
-function resolveBuiltBinary(bin) {
-  let binary = `out/${common.buildType}/${bin}`;
-  if (common.isWindows) {
-    binary += '.exe';
-  }
-  return path.resolve(__dirname, '..', '..', binary);
-}
+const binary = common.resolveBuiltBinary('embedtest');
 
-const binary = resolveBuiltBinary('embedtest');
-
-spawnSyncAndExitWithoutError(
+spawnSyncAndAssert(
   binary,
   ['console.log(42)'],
   {
@@ -32,7 +25,7 @@ spawnSyncAndExitWithoutError(
     stdout: '42',
   });
 
-spawnSyncAndExitWithoutError(
+spawnSyncAndAssert(
   binary,
   ['console.log(embedVars.nön_ascıı)'],
   {
@@ -78,7 +71,9 @@ function getReadFileCodeForPath(path) {
 }
 
 // Basic snapshot support
-for (const extraSnapshotArgs of [[], ['--embedder-snapshot-as-file']]) {
+for (const extraSnapshotArgs of [
+  [], ['--embedder-snapshot-as-file'], ['--without-code-cache'],
+]) {
   // readSync + eval since snapshots don't support userland require() (yet)
   const snapshotFixture = fixtures.path('snapshot', 'echo-args.js');
   const blobPath = tmpdir.resolve('embedder-snapshot.blob');
@@ -110,9 +105,8 @@ for (const extraSnapshotArgs of [[], ['--embedder-snapshot-as-file']]) {
   spawnSyncAndExitWithoutError(
     binary,
     [ '--', ...buildSnapshotArgs ],
-    { cwd: tmpdir.path },
-    {});
-  spawnSyncAndExitWithoutError(
+    { cwd: tmpdir.path });
+  spawnSyncAndAssert(
     binary,
     [ '--', ...runSnapshotArgs ],
     { cwd: tmpdir.path },
@@ -144,11 +138,27 @@ for (const extraSnapshotArgs of [[], ['--embedder-snapshot-as-file']]) {
   spawnSyncAndExitWithoutError(
     binary,
     [ '--', ...buildSnapshotArgs ],
-    { cwd: tmpdir.path },
-    {});
+    { cwd: tmpdir.path });
   spawnSyncAndExitWithoutError(
     binary,
     [ '--', ...runEmbeddedArgs ],
-    { cwd: tmpdir.path },
-    {});
+    { cwd: tmpdir.path });
+}
+
+// Guarantee NODE_REPL_EXTERNAL_MODULE won't bypass kDisableNodeOptionsEnv
+if (!process.config.variables.node_without_node_options) {
+  spawnSyncAndExit(
+    binary,
+    ['require("os")'],
+    {
+      env: {
+        ...process.env,
+        'NODE_REPL_EXTERNAL_MODULE': 'fs',
+      },
+    },
+    {
+      status: 9,
+      signal: null,
+      stderr: `${binary}: NODE_REPL_EXTERNAL_MODULE can't be used with kDisableNodeOptionsEnv${os.EOL}`,
+    });
 }

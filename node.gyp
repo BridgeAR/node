@@ -4,30 +4,42 @@
     'v8_trace_maps%': 0,
     'v8_enable_pointer_compression%': 0,
     'v8_enable_31bit_smis_on_64bit_arch%': 0,
-    'node_no_browser_globals%': 'false',
-    'node_snapshot_main%': '',
-    'node_use_node_snapshot%': 'false',
-    'node_use_v8_platform%': 'true',
-    'node_use_bundled_v8%': 'true',
-    'node_shared%': 'false',
-    'node_write_snapshot_as_string_literals': 'true',
     'force_dynamic_crt%': 0,
-    'ossfuzz' : 'false',
-    'node_module_version%': '',
-    'node_shared_brotli%': 'false',
-    'node_shared_zlib%': 'false',
-    'node_shared_http_parser%': 'false',
-    'node_shared_cares%': 'false',
-    'node_shared_libuv%': 'false',
-    'node_shared_nghttp2%': 'false',
-    'node_use_openssl%': 'true',
-    'node_shared_openssl%': 'false',
-    'node_v8_options%': '',
-    'node_enable_v8_vtunejit%': 'false',
-    'node_core_target_name%': 'node',
-    'node_lib_target_name%': 'libnode',
-    'node_intermediate_lib_type%': 'static_library',
     'node_builtin_modules_path%': '',
+    'node_core_target_name%': 'node',
+    'node_enable_v8_vtunejit%': 'false',
+    'node_intermediate_lib_type%': 'static_library',
+    'node_lib_target_name%': 'libnode',
+    'node_module_version%': '',
+    'node_no_browser_globals%': 'false',
+    'node_shared_brotli%': 'false',
+    'node_shared_cares%': 'false',
+    'node_shared_gtest%': 'false',
+    'node_shared_hdr_histogram%': 'false',
+    'node_shared_http_parser%': 'false',
+    'node_shared_libuv%': 'false',
+    'node_shared_lief%': 'false',
+    'node_shared_nbytes%': 'false',
+    'node_shared_nghttp2%': 'false',
+    'node_shared_openssl%': 'false',
+    'node_shared_sqlite%': 'false',
+    'node_shared_temporal_capi%': 'false',
+    'node_shared_uvwasi%': 'false',
+    'node_shared_zlib%': 'false',
+    'node_shared_zstd%': 'false',
+    'node_shared%': 'false',
+    'node_snapshot_main%': '',
+    'node_use_amaro%': 'true',
+    'node_use_bundled_v8%': 'true',
+    'node_use_lief%': 'false',
+    'node_use_node_snapshot%': 'false',
+    'node_use_openssl%': 'true',
+    'node_use_quic%': 'false',
+    'node_use_sqlite%': 'true',
+    'node_use_v8_platform%': 'true',
+    'node_v8_options%': '',
+    'node_write_snapshot_as_string_literals': 'true',
+    'ossfuzz' : 'false',
     'linked_module_files': [
     ],
     # We list the deps/ files out instead of globbing them in js2c.cc since we
@@ -65,20 +77,25 @@
       'src/api/exceptions.cc',
       'src/api/hooks.cc',
       'src/api/utils.cc',
+      'src/async_context_frame.cc',
       'src/async_wrap.cc',
       'src/base_object.cc',
+      'src/builtin_info.cc',
       'src/cares_wrap.cc',
       'src/cleanup_queue.cc',
+      'src/compile_cache.cc',
       'src/connect_wrap.cc',
       'src/connection_wrap.cc',
       'src/dataqueue/queue.cc',
       'src/debug_utils.cc',
+      'src/embedded_data.cc',
       'src/encoding_binding.cc',
       'src/env.cc',
       'src/fs_event_wrap.cc',
       'src/handle_wrap.cc',
       'src/heap_utils.cc',
       'src/histogram.cc',
+      'src/internal_only_v8.cc',
       'src/js_native_api.h',
       'src/js_native_api_types.h',
       'src/js_native_api_v8.cc',
@@ -87,8 +104,6 @@
       'src/js_stream.cc',
       'src/json_utils.cc',
       'src/js_udp_wrap.cc',
-      'src/json_parser.h',
-      'src/json_parser.cc',
       'src/module_wrap.cc',
       'src/node.cc',
       'src/node_api.cc',
@@ -97,9 +112,12 @@
       'src/node_buffer.cc',
       'src/node_builtins.cc',
       'src/node_config.cc',
+      'src/node_config_file.cc',
       'src/node_constants.cc',
+      'src/node_cjs_lexer.cc',
       'src/node_contextify.cc',
       'src/node_credentials.cc',
+      'src/node_debug.cc',
       'src/node_dir.cc',
       'src/node_dotenv.cc',
       'src/node_env_var.cc',
@@ -109,6 +127,7 @@
       'src/node_http_parser.cc',
       'src/node_http2.cc',
       'src/node_i18n.cc',
+      'src/node_locks.cc',
       'src/node_main_instance.cc',
       'src/node_messaging.cc',
       'src/node_metadata.cc',
@@ -126,6 +145,7 @@
       'src/node_report_module.cc',
       'src/node_report_utils.cc',
       'src/node_sea.cc',
+      'src/node_sea_bin.cc',
       'src/node_serdes.cc',
       'src/node_shadow_realm.cc',
       'src/node_snapshotable.cc',
@@ -133,9 +153,11 @@
       'src/node_stat_watcher.cc',
       'src/node_symbols.cc',
       'src/node_task_queue.cc',
+      'src/node_task_runner.cc',
       'src/node_trace_events.cc',
       'src/node_types.cc',
       'src/node_url.cc',
+      'src/node_url_pattern.cc',
       'src/node_util.cc',
       'src/node_v8.cc',
       'src/node_wasi.cc',
@@ -143,11 +165,15 @@
       'src/node_watchdog.cc',
       'src/node_worker.cc',
       'src/node_zlib.cc',
+      'src/path.cc',
       'src/permission/child_process_permission.cc',
       'src/permission/fs_permission.cc',
       'src/permission/inspector_permission.cc',
       'src/permission/permission.cc',
+      'src/permission/wasi_permission.cc',
       'src/permission/worker_permission.cc',
+      'src/permission/net_permission.cc',
+      'src/permission/addon_permission.cc',
       'src/pipe_wrap.cc',
       'src/process_wrap.cc',
       'src/signal_wrap.cc',
@@ -174,24 +200,28 @@
       'src/aliased_buffer-inl.h',
       'src/aliased_struct.h',
       'src/aliased_struct-inl.h',
+      'src/async_context_frame.h',
       'src/async_wrap.h',
       'src/async_wrap-inl.h',
       'src/base_object.h',
       'src/base_object-inl.h',
       'src/base_object_types.h',
-      'src/base64.h',
-      'src/base64-inl.h',
       'src/blob_serializer_deserializer.h',
       'src/blob_serializer_deserializer-inl.h',
+      "src/builtin_info.h",
       'src/callback_queue.h',
       'src/callback_queue-inl.h',
       'src/cleanup_queue.h',
       'src/cleanup_queue-inl.h',
+      'src/compile_cache.h',
       'src/connect_wrap.h',
       'src/connection_wrap.h',
+      'src/cppgc_helpers.h',
+      'src/cppgc_helpers.cc',
       'src/dataqueue/queue.h',
       'src/debug_utils.h',
       'src/debug_utils-inl.h',
+      'src/embedded_data.h',
       'src/encoding_binding.h',
       'src/env_properties.h',
       'src/env.h',
@@ -213,9 +243,11 @@
       'src/node_blob.h',
       'src/node_buffer.h',
       'src/node_builtins.h',
+      'src/node_config_file.h',
       'src/node_constants.h',
       'src/node_context_data.h',
       'src/node_contextify.h',
+      'src/node_debug.h',
       'src/node_dir.h',
       'src/node_dotenv.h',
       'src/node_errors.h',
@@ -229,6 +261,7 @@
       'src/node_http2_state.h',
       'src/node_i18n.h',
       'src/node_internals.h',
+      'src/node_locks.h',
       'src/node_main_instance.h',
       'src/node_mem.h',
       'src/node_mem-inl.h',
@@ -258,17 +291,22 @@
       'src/node_stat_watcher.h',
       'src/node_union_bytes.h',
       'src/node_url.h',
+      'src/node_url_pattern.h',
       'src/node_version.h',
       'src/node_v8.h',
       'src/node_v8_platform-inl.h',
       'src/node_wasi.h',
       'src/node_watchdog.h',
       'src/node_worker.h',
+      'src/path.h',
       'src/permission/child_process_permission.h',
       'src/permission/fs_permission.h',
       'src/permission/inspector_permission.h',
       'src/permission/permission.h',
+      'src/permission/wasi_permission.h',
       'src/permission/worker_permission.h',
+      'src/permission/net_permission.h',
+      'src/permission/addon_permission.h',
       'src/pipe_wrap.h',
       'src/req_wrap.h',
       'src/req_wrap-inl.h',
@@ -280,7 +318,6 @@
       'src/string_bytes.h',
       'src/string_decoder.h',
       'src/string_decoder-inl.h',
-      'src/string_search.h',
       'src/tcp_wrap.h',
       'src/timers.h',
       'src/tracing/agent.h',
@@ -296,9 +333,46 @@
       'src/util.h',
       'src/util-inl.h',
     ],
+    'node_quic_sources': [
+      'src/quic/bindingdata.cc',
+      'src/quic/cid.cc',
+      'src/quic/data.cc',
+      'src/quic/logstream.cc',
+      'src/quic/packet.cc',
+      'src/quic/preferredaddress.cc',
+      'src/quic/sessionticket.cc',
+      'src/quic/tokens.cc',
+      'src/quic/application.cc',
+      'src/quic/endpoint.cc',
+      'src/quic/http3.cc',
+      'src/quic/session.cc',
+      'src/quic/streams.cc',
+      'src/quic/tlscontext.cc',
+      'src/quic/transportparams.cc',
+      'src/quic/quic.cc',
+      'src/quic/bindingdata.h',
+      'src/quic/cid.h',
+      'src/quic/data.h',
+      'src/quic/defs.h',
+      'src/quic/logstream.h',
+      'src/quic/packet.h',
+      'src/quic/preferredaddress.h',
+      'src/quic/sessionticket.h',
+      'src/quic/tokens.h',
+      'src/quic/transportparams.h',
+      'src/quic/application.h',
+      'src/quic/endpoint.h',
+      'src/quic/http3.h',
+      'src/quic/session.h',
+      'src/quic/streams.h',
+      'src/quic/tlscontext.h',
+      'src/quic/guard.h',
+    ],
     'node_crypto_sources': [
       'src/crypto/crypto_aes.cc',
+      'src/crypto/crypto_argon2.cc',
       'src/crypto/crypto_bio.cc',
+      'src/crypto/crypto_chacha20_poly1305.cc',
       'src/crypto/crypto_common.cc',
       'src/crypto/crypto_dsa.cc',
       'src/crypto/crypto_hkdf.cc',
@@ -308,7 +382,10 @@
       'src/crypto/crypto_cipher.cc',
       'src/crypto/crypto_context.cc',
       'src/crypto/crypto_ec.cc',
+      'src/crypto/crypto_ml_dsa.cc',
+      'src/crypto/crypto_kem.cc',
       'src/crypto/crypto_hmac.cc',
+      'src/crypto/crypto_kmac.cc',
       'src/crypto/crypto_random.cc',
       'src/crypto/crypto_rsa.cc',
       'src/crypto/crypto_spkac.cc',
@@ -321,10 +398,12 @@
       'src/crypto/crypto_scrypt.cc',
       'src/crypto/crypto_tls.cc',
       'src/crypto/crypto_x509.cc',
+      'src/crypto/crypto_argon2.h',
       'src/crypto/crypto_bio.h',
       'src/crypto/crypto_clienthello-inl.h',
       'src/crypto/crypto_dh.h',
       'src/crypto/crypto_hmac.h',
+      'src/crypto/crypto_kmac.h',
       'src/crypto/crypto_rsa.h',
       'src/crypto/crypto_spkac.h',
       'src/crypto/crypto_util.h',
@@ -339,6 +418,7 @@
       'src/crypto/crypto_clienthello.h',
       'src/crypto/crypto_context.h',
       'src/crypto/crypto_ec.h',
+      'src/crypto/crypto_ml_dsa.h',
       'src/crypto/crypto_hkdf.h',
       'src/crypto/crypto_pbkdf2.h',
       'src/crypto/crypto_sig.h',
@@ -348,67 +428,28 @@
       'src/node_crypto.cc',
       'src/node_crypto.h',
     ],
-    'node_quic_sources': [
-      'src/quic/application.cc',
-      'src/quic/bindingdata.cc',
-      'src/quic/cid.cc',
-      'src/quic/data.cc',
-      'src/quic/endpoint.cc',
-      'src/quic/logstream.cc',
-      'src/quic/packet.cc',
-      'src/quic/preferredaddress.cc',
-      'src/quic/session.cc',
-      'src/quic/sessionticket.cc',
-      'src/quic/streams.cc',
-      'src/quic/tlscontext.cc',
-      'src/quic/tokens.cc',
-      'src/quic/transportparams.cc',
-      'src/quic/application.h',
-      'src/quic/bindingdata.h',
-      'src/quic/cid.h',
-      'src/quic/data.h',
-      'src/quic/endpoint.h',
-      'src/quic/logstream.h',
-      'src/quic/packet.h',
-      'src/quic/preferredaddress.h',
-      'src/quic/session.h',
-      'src/quic/sessionticket.h',
-      'src/quic/streams.h',
-      'src/quic/tlscontext.h',
-      'src/quic/tokens.h',
-      'src/quic/transportparams.h',
-    ],
-    'node_cctest_sources': [
-      'src/node_snapshot_stub.cc',
-      'test/cctest/node_test_fixture.cc',
-      'test/cctest/node_test_fixture.h',
-      'test/cctest/test_aliased_buffer.cc',
-      'test/cctest/test_base64.cc',
-      'test/cctest/test_base_object_ptr.cc',
-      'test/cctest/test_cppgc.cc',
-      'test/cctest/test_node_postmortem_metadata.cc',
-      'test/cctest/test_environment.cc',
-      'test/cctest/test_linked_binding.cc',
-      'test/cctest/test_node_api.cc',
-      'test/cctest/test_per_process.cc',
-      'test/cctest/test_platform.cc',
-      'test/cctest/test_report.cc',
-      'test/cctest/test_json_utils.cc',
-      'test/cctest/test_sockaddr.cc',
-      'test/cctest/test_traced_value.cc',
-      'test/cctest/test_util.cc',
-      'test/cctest/test_dataqueue.cc',
-    ],
     'node_cctest_openssl_sources': [
       'test/cctest/test_crypto_clienthello.cc',
       'test/cctest/test_node_crypto.cc',
       'test/cctest/test_node_crypto_env.cc',
+    ],
+    'node_cctest_quic_sources': [
       'test/cctest/test_quic_cid.cc',
+      'test/cctest/test_quic_error.cc',
+      'test/cctest/test_quic_preferredaddress.cc',
       'test/cctest/test_quic_tokens.cc',
     ],
     'node_cctest_inspector_sources': [
+      'test/cctest/inspector/test_network_requests_buffer.cc',
+      'test/cctest/inspector/test_node_protocol.cc',
       'test/cctest/test_inspector_socket.cc',
       'test/cctest/test_inspector_socket_server.cc',
+    ],
+    'node_sqlite_sources': [
+      'src/node_sqlite.cc',
+      'src/node_webstorage.cc',
+      'src/node_sqlite.h',
+      'src/node_webstorage.h',
     ],
     'node_mksnapshot_exec': '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)node_mksnapshot<(EXECUTABLE_SUFFIX)',
     'node_js2c_exec': '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)node_js2c<(EXECUTABLE_SUFFIX)',
@@ -457,25 +498,48 @@
         '-Wno-unused-parameter',
         '-Werror=undefined-inline',
         '-Werror=extra-semi',
+        '-Werror=ctad-maybe-unsupported',
       ],
     },
 
-    # Relevant only for x86.
-    # Refs: https://github.com/nodejs/node/pull/25852
-    # Refs: https://docs.microsoft.com/en-us/cpp/build/reference/safeseh-image-has-safe-exception-handlers
-    'msvs_settings': {
-      'VCLinkerTool': {
-        'ImageHasSafeExceptionHandlers': 'false',
-      },
-    },
-
     'conditions': [
+      ['clang==0 and OS!="win"', {
+        'cflags': [ '-Wno-restrict', ],
+      }],
+      # TODO(joyeecheung): investigate if it breaks addons.
+      # ['OS=="mac"', {
+      #   'xcode_settings': {
+      #     'GCC_SYMBOLS_PRIVATE_EXTERN': 'YES',  # -fvisibility=hidden
+      #     'GCC_INLINES_ARE_PRIVATE_EXTERN': 'YES'  # -fvisibility-inlines-hidden
+      #   },
+      # }],
+      # ['OS!="win" or clang==1', {
+      #   'cflags': [
+      #     '-fvisibility=hidden',
+      #     '-fvisibility-inlines-hidden'
+      #   ],
+      # }],
+      # Pointer authentication for ARM64.
+      ['target_arch=="arm64"', {
+          'target_conditions': [
+              ['_toolset=="host"', {
+                  'conditions': [
+                      ['host_arch=="arm64"', {
+                          'cflags': ['-mbranch-protection=standard'],
+                      }],
+                  ],
+              }],
+              ['_toolset=="target"', {
+                  'cflags': ['-mbranch-protection=standard'],
+              }],
+          ],
+      }],
       ['OS in "aix os400"', {
         'ldflags': [
           '-Wl,-bnoerrmsg',
         ],
       }],
-      ['OS == "linux" and llvm_version != "0.0"', {
+      ['OS=="linux" and clang==1', {
         'libraries': ['-latomic'],
       }],
     ],
@@ -486,7 +550,7 @@
       'target_name': 'node_text_start',
       'type': 'none',
       'conditions': [
-        [ 'OS in "linux freebsd solaris" and '
+        [ 'OS in "linux freebsd solaris openharmony" and '
           'target_arch=="x64"', {
           'type': 'static_library',
           'sources': [
@@ -519,11 +583,6 @@
         'src/node_main.cc'
       ],
 
-      'dependencies': [
-        'deps/histogram/histogram.gyp:histogram',
-        'deps/uvwasi/uvwasi.gyp:uvwasi',
-      ],
-
       'msvs_settings': {
         'VCLinkerTool': {
           'GenerateMapFile': 'true', # /MAP
@@ -545,6 +604,11 @@
       'msvs_disabled_warnings!': [4244],
 
       'conditions': [
+        [ 'node_shared_hdr_histogram=="false"', {
+          'dependencies': [
+            'deps/histogram/histogram.gyp:histogram',
+          ],
+        }],
         [ 'error_on_warn=="true"', {
           'cflags': ['-Werror'],
           'xcode_settings': {
@@ -581,8 +645,8 @@
           'msvs_settings': {
             'VCLinkerTool': {
               'AdditionalOptions': [
-                '/WHOLEARCHIVE:<(node_lib_target_name)<(STATIC_LIB_SUFFIX)',
-                '/WHOLEARCHIVE:<(STATIC_LIB_PREFIX)v8_base_without_compiler<(STATIC_LIB_SUFFIX)',
+                '/WHOLEARCHIVE:<(PRODUCT_DIR)/lib/<(node_lib_target_name)<(STATIC_LIB_SUFFIX)',
+                '/WHOLEARCHIVE:<(PRODUCT_DIR)/lib/<(STATIC_LIB_PREFIX)v8_base_without_compiler<(STATIC_LIB_SUFFIX)',
               ],
             },
           },
@@ -605,7 +669,7 @@
             'OTHER_LDFLAGS': [ '-Wl,-rpath,@loader_path', '-Wl,-rpath,@loader_path/../lib'],
           },
           'conditions': [
-            ['OS=="linux"', {
+            ['OS=="linux" or OS=="openharmony"', {
                'ldflags': [
                  '-Wl,-rpath,\\$$ORIGIN/../lib'
                ],
@@ -710,7 +774,7 @@
             'src/node_snapshot_stub.cc'
           ],
         }],
-        [ 'OS in "linux freebsd" and '
+        [ 'OS in "linux freebsd openharmony" and '
           'target_arch=="x64"', {
           'dependencies': [ 'node_text_start' ],
           'ldflags+': [
@@ -814,13 +878,7 @@
         '<(SHARED_INTERMEDIATE_DIR)' # for node_natives.h
       ],
       'dependencies': [
-        'deps/base64/base64.gyp:base64',
-        'deps/googletest/googletest.gyp:gtest_prod',
-        'deps/histogram/histogram.gyp:histogram',
-        'deps/uvwasi/uvwasi.gyp:uvwasi',
-        'deps/simdjson/simdjson.gyp:simdjson',
-        'deps/simdutf/simdutf.gyp:simdutf',
-        'deps/ada/ada.gyp:ada',
+        'tools/v8_gypfiles/abseil.gyp:abseil',
         'node_js2c#host',
       ],
 
@@ -841,15 +899,17 @@
         'openssl_default_cipher_list%': '',
       },
 
-      'cflags': ['-Werror=unused-result'],
-
       'defines': [
         'NODE_ARCH="<(target_arch)"',
         'NODE_PLATFORM="<(OS)"',
         'NODE_WANT_INTERNALS=1',
+        # Define NAPI_EXPERIMENTAL to enable Node-API experimental function symbols being exposed.
+        'NAPI_EXPERIMENTAL=1',
+        'NODE_API_EXPERIMENTAL_NO_WARNING=1',
         # Warn when using deprecated V8 APIs.
         'V8_DEPRECATION_WARNINGS=1',
         'NODE_OPENSSL_SYSTEM_CERT_PATH="<(openssl_system_ca_path)"',
+        "SQLITE_ENABLE_SESSION"
       ],
 
       # - "C4244: conversion from 'type1' to 'type2', possible loss of data"
@@ -861,6 +921,9 @@
           'defines': [
             'NODE_OPENSSL_DEFAULT_CIPHER_LIST="<(openssl_default_cipher_list)"'
            ]
+        }],
+        [ 'suppress_all_error_on_warn=="false"', {
+          'cflags': ['-Werror=unused-result'],
         }],
         [ 'error_on_warn=="true"', {
           'cflags': ['-Werror'],
@@ -875,6 +938,26 @@
           'sources': [
             'src/node_snapshot_stub.cc',
           ]
+        }],
+        [ 'node_shared_gtest=="false"', {
+          'dependencies': [
+            'deps/googletest/googletest.gyp:gtest_prod',
+          ],
+        }],
+        [ 'node_shared_hdr_histogram=="false"', {
+          'dependencies': [
+            'deps/histogram/histogram.gyp:histogram',
+          ],
+        }],
+        [ 'node_shared_nbytes=="false"', {
+          'dependencies': [
+            'deps/nbytes/nbytes.gyp:nbytes',
+          ],
+        }],
+        [ 'node_use_sqlite=="true"', {
+          'sources': [
+            '<@(node_sqlite_sources)',
+          ],
         }],
         [ 'node_shared=="true" and node_module_version!="" and OS!="win"', {
           'product_extension': '<(shlib_suffix)',
@@ -914,10 +997,29 @@
         [ 'node_use_openssl=="true"', {
           'sources': [
             '<@(node_crypto_sources)',
+          ],
+          'dependencies': [
+            'deps/ncrypto/ncrypto.gyp:ncrypto',
+          ],
+        }],
+        [ 'node_use_lief=="true" and node_shared_lief=="false"', {
+          'defines': [ 'HAVE_LIEF=1' ],
+          'dependencies': [ 'deps/LIEF/lief.gyp:liblief' ],
+        }],
+        [ 'node_use_lief=="true" and node_shared_lief=="true"', {
+          'defines': [ 'HAVE_LIEF=1' ],
+        }],
+        [ 'node_use_sqlite=="true"', {
+          'sources': [
+            '<@(node_sqlite_sources)',
+          ],
+        }],
+        [ 'node_use_quic=="true"', {
+          'sources': [
             '<@(node_quic_sources)',
           ],
         }],
-        [ 'OS in "linux freebsd mac solaris" and '
+        [ 'OS in "linux freebsd mac solaris openharmony" and '
           'target_arch=="x64" and '
           'node_target_type=="executable"', {
           'defines': [ 'NODE_ENABLE_LARGE_CODE_PAGES=1' ],
@@ -928,11 +1030,11 @@
           'variables': {
             'mkssldef_flags': [
               # Categories to export.
-              '-CAES,BF,BIO,DES,DH,DSA,EC,ECDH,ECDSA,ENGINE,EVP,HMAC,MD4,MD5,'
-              'PSK,RC2,RC4,RSA,SHA,SHA0,SHA1,SHA256,SHA512,SOCK,STDIO,TLSEXT,'
-              'UI,FP_API,TLS1_METHOD,TLS1_1_METHOD,TLS1_2_METHOD,SCRYPT,OCSP,'
-              'NEXTPROTONEG,RMD160,CAST,DEPRECATEDIN_1_1_0,DEPRECATEDIN_1_2_0,'
-              'DEPRECATEDIN_3_0',
+              '-CAES,ARGON2,BF,BIO,DES,DH,DSA,EC,ECDH,ECDSA,ENGINE,EVP,HMAC,'
+              'MD4,MD5,PSK,RC2,RC4,RSA,SHA,SHA0,SHA1,SHA256,SHA512,SOCK,STDIO,'
+              'TLSEXT,UI,FP_API,TLS1_METHOD,TLS1_1_METHOD,TLS1_2_METHOD,'
+              'SCRYPT,OCSP,NEXTPROTONEG,RMD160,CAST,DEPRECATEDIN_1_1_0,'
+              'DEPRECATEDIN_1_2_0,DEPRECATEDIN_3_0',
               # Defines.
               '-DWIN32',
               # Symbols to filter from the export list.
@@ -1001,9 +1103,8 @@
       'type': 'executable',
       'dependencies': [
         '<(node_lib_target_name)',
-        'deps/histogram/histogram.gyp:histogram',
-        'deps/uvwasi/uvwasi.gyp:uvwasi',
       ],
+
       'includes': [
         'node.gypi'
       ],
@@ -1013,9 +1114,9 @@
         'deps/v8/include',
         'deps/cares/include',
         'deps/uv/include',
-        'deps/uvwasi/include',
         'test/cctest',
       ],
+
       'defines': [
         'NODE_ARCH="<(target_arch)"',
         'NODE_PLATFORM="<(OS)"',
@@ -1026,11 +1127,16 @@
         'test/fuzzers/fuzz_env.cc',
       ],
       'conditions': [
-        ['OS=="linux"', {
+        [ 'node_shared_hdr_histogram=="false"', {
+          'dependencies': [
+            'deps/histogram/histogram.gyp:histogram',
+          ],
+        }],
+        ['OS=="linux" or OS=="openharmony"', {
           'ldflags': [ '-fsanitize=fuzzer' ]
         }],
         # Ensure that ossfuzz flag has been set and that we are on Linux
-        [ 'OS!="linux" or ossfuzz!="true"', {
+        [ 'OS not in "linux openharmony" or ossfuzz!="true"', {
           'type': 'none',
         }],
         # Avoid excessive LTO
@@ -1039,20 +1145,121 @@
         }],
       ],
     }, # fuzz_env
+    { # fuzz_ClientHelloParser.cc
+      'target_name': 'fuzz_ClientHelloParser',
+      'type': 'executable',
+      'dependencies': [
+        '<(node_lib_target_name)',
+      ],
+      'includes': [
+        'node.gypi'
+      ],
+      'include_dirs': [
+        'src',
+        'tools/msvs/genfiles',
+        'deps/v8/include',
+        'deps/cares/include',
+        'deps/uv/include',
+        'test/cctest',
+      ],
+      'defines': [
+        'NODE_ARCH="<(target_arch)"',
+        'NODE_PLATFORM="<(OS)"',
+        'NODE_WANT_INTERNALS=1',
+      ],
+      'sources': [
+        'src/node_snapshot_stub.cc',
+        'test/fuzzers/fuzz_ClientHelloParser.cc',
+      ],
+      'conditions': [
+        [ 'node_shared_hdr_histogram=="false"', {
+          'dependencies': [
+            'deps/histogram/histogram.gyp:histogram',
+          ],
+        }],
+        [ 'node_shared_uvwasi=="false"', {
+          'dependencies': [ 'deps/uvwasi/uvwasi.gyp:uvwasi' ],
+          'include_dirs': [ 'deps/uvwasi/include' ],
+        }],
+        ['OS=="linux" or OS=="openharmony"', {
+          'ldflags': [ '-fsanitize=fuzzer' ]
+        }],
+        # Ensure that ossfuzz flag has been set and that we are on Linux
+        [ 'OS not in "linux openharmony" or ossfuzz!="true"', {
+          'type': 'none',
+        }],
+        # Avoid excessive LTO
+        ['enable_lto=="true"', {
+          'ldflags': [ '-fno-lto' ],
+        }],
+      ],
+    }, # fuzz_ClientHelloParser.cc
+    { # fuzz_strings
+      'target_name': 'fuzz_strings',
+      'type': 'executable',
+      'dependencies': [
+        '<(node_lib_target_name)',
+      ],
+      'includes': [
+        'node.gypi'
+      ],
+      'include_dirs': [
+        'src',
+        'tools/msvs/genfiles',
+        'deps/v8/include',
+        'deps/cares/include',
+        'deps/uv/include',
+        'test/cctest',
+      ],
+      'defines': [
+        'NODE_ARCH="<(target_arch)"',
+        'NODE_PLATFORM="<(OS)"',
+        'NODE_WANT_INTERNALS=1',
+      ],
+      'sources': [
+        'src/node_snapshot_stub.cc',
+        'test/fuzzers/fuzz_strings.cc',
+      ],
+      'conditions': [
+        [ 'node_shared_gtest=="false"', {
+          'dependencies': [
+            'deps/googletest/googletest.gyp:gtest_prod',
+          ],
+        }],
+        [ 'node_shared_hdr_histogram=="false"', {
+          'dependencies': [
+            'deps/histogram/histogram.gyp:histogram',
+          ],
+        }],
+        [ 'node_shared_nbytes=="false"', {
+          'dependencies': [
+            'deps/nbytes/nbytes.gyp:nbytes',
+          ],
+        }],
+        [ 'node_shared_uvwasi=="false"', {
+          'dependencies': [ 'deps/uvwasi/uvwasi.gyp:uvwasi' ],
+          'include_dirs': [ 'deps/uvwasi/include' ],
+        }],
+        ['OS=="linux" or OS=="openharmony"', {
+          'ldflags': [ '-fsanitize=fuzzer' ]
+        }],
+        # Ensure that ossfuzz flag has been set and that we are on Linux
+        [ 'OS not in "linux openharmony" or ossfuzz!="true"', {
+          'type': 'none',
+        }],
+        # Avoid excessive LTO
+        ['enable_lto=="true"', {
+          'ldflags': [ '-fno-lto' ],
+        }],
+      ],
+    }, # fuzz_strings
     {
       'target_name': 'cctest',
       'type': 'executable',
 
       'dependencies': [
         '<(node_lib_target_name)',
-        'deps/base64/base64.gyp:base64',
-        'deps/googletest/googletest.gyp:gtest',
-        'deps/googletest/googletest.gyp:gtest_main',
-        'deps/histogram/histogram.gyp:histogram',
-        'deps/uvwasi/uvwasi.gyp:uvwasi',
-        'deps/simdjson/simdjson.gyp:simdjson',
-        'deps/simdutf/simdutf.gyp:simdutf',
-        'deps/ada/ada.gyp:ada',
+        'tools/v8_gypfiles/abseil.gyp:abseil',
       ],
 
       'includes': [
@@ -1065,7 +1272,6 @@
         'deps/v8/include',
         'deps/cares/include',
         'deps/uv/include',
-        'deps/uvwasi/include',
         'test/cctest',
       ],
 
@@ -1078,21 +1284,59 @@
       'sources': [ '<@(node_cctest_sources)' ],
 
       'conditions': [
+        [ 'node_shared_gtest=="false"', {
+          'dependencies': [
+            'deps/googletest/googletest.gyp:gtest',
+            'deps/googletest/googletest.gyp:gtest_main',
+          ],
+        }],
+        [ 'node_shared_gtest=="true"', {
+          'libraries': [ '-lgtest_main' ],
+        }],
+        [ 'node_shared_hdr_histogram=="false"', {
+          'dependencies': [
+            'deps/histogram/histogram.gyp:histogram',
+          ],
+        }],
+        [ 'node_shared_nbytes=="false"', {
+          'dependencies': [
+            'deps/nbytes/nbytes.gyp:nbytes',
+          ],
+        }],
         [ 'node_use_openssl=="true"', {
           'defines': [
             'HAVE_OPENSSL=1',
           ],
-          'sources': [ '<@(node_cctest_openssl_sources)' ],
+          'dependencies': [
+            'deps/ncrypto/ncrypto.gyp:ncrypto',
+          ],
+        }, {
+          'sources!': [ '<@(node_cctest_openssl_sources)' ],
+        }],
+        [ 'node_use_quic=="true"', {
+          'defines': [
+            'HAVE_QUIC=1',
+          ],
+        }, {
+          'sources!': [ '<@(node_cctest_quic_sources)' ],
         }],
         ['v8_enable_inspector==1', {
           'defines': [
             'HAVE_INSPECTOR=1',
           ],
-          'sources': [ '<@(node_cctest_inspector_sources)' ],
+          'include_dirs': [
+            # TODO(legendecas): make node_inspector.gypi a dependable target.
+            '<(SHARED_INTERMEDIATE_DIR)', # for inspector
+            '<(SHARED_INTERMEDIATE_DIR)/src', # for inspector
+          ],
+          'dependencies': [
+            'deps/inspector_protocol/inspector_protocol.gyp:crdtp',
+          ],
         }, {
            'defines': [
              'HAVE_INSPECTOR=0',
-           ]
+           ],
+           'sources!': [ '<@(node_cctest_inspector_sources)' ],
         }],
         ['OS=="solaris"', {
           'ldflags': [ '-I<(SHARED_INTERMEDIATE_DIR)' ]
@@ -1126,9 +1370,6 @@
 
       'dependencies': [
         '<(node_lib_target_name)',
-        'deps/histogram/histogram.gyp:histogram',
-        'deps/uvwasi/uvwasi.gyp:uvwasi',
-        'deps/ada/ada.gyp:ada',
       ],
 
       'includes': [
@@ -1137,11 +1378,11 @@
 
       'include_dirs': [
         'src',
+        'tools',
         'tools/msvs/genfiles',
         'deps/v8/include',
         'deps/cares/include',
         'deps/uv/include',
-        'deps/uvwasi/include',
         'test/embedding',
       ],
 
@@ -1163,6 +1404,16 @@
             'OTHER_LDFLAGS': [ '-Wl,-rpath,@loader_path', ],
           },
         }],
+        [ 'node_shared_hdr_histogram=="false"', {
+          'dependencies': [
+            'deps/histogram/histogram.gyp:histogram',
+          ],
+        }],
+        [ 'node_shared_nbytes=="false"', {
+          'dependencies': [
+            'deps/nbytes/nbytes.gyp:nbytes',
+          ],
+        }],
         ['OS=="win"', {
           'libraries': [
             'Dbghelp.lib',
@@ -1176,6 +1427,61 @@
         }],
       ],
     }, # embedtest
+
+    {
+      'target_name': 'shared_embedtest',
+      'type': 'executable',
+
+      'dependencies': [
+        '<(node_lib_target_name)',
+      ],
+
+      # Don't depend on node.gypi - it otherwise links to
+      # the static libraries and resolve symbols at build time.
+      'include_dirs': [
+        'deps/v8/include',
+      ],
+
+      'sources': [
+        'test/embedding/shared_embedtest.cc',
+      ],
+      'conditions': [
+        [ 'node_shared=="true"', {
+          'defines': [
+            'USING_V8_SHARED',
+            'USING_V8_PLATFORM_SHARED',
+          ],
+          'defines!': [
+            'BUILDING_V8_PLATFORM_SHARED=1',
+            'BUILDING_V8_SHARED=1',
+          ],
+        }, {
+          # Only test shared embedding when Node is built as shared library.
+          'type': 'none',
+        }],
+        # Only test platforms known to work.
+        ['OS not in "mac win linux"', {
+          'type': 'none',
+        }],
+        ['OS=="win"', {
+          'libraries': [
+            'Dbghelp.lib',
+            'winmm.lib',
+            'Ws2_32.lib',
+          ],
+        }],
+        ['OS=="mac"', {
+          'xcode_settings': {
+            'OTHER_LDFLAGS': [ '-Wl,-rpath,@loader_path', ],
+          }
+        }],
+        ['OS=="linux"', {
+          'ldflags': [
+            '-Wl,-rpath,\\$$ORIGIN'
+          ],
+        }],
+      ],
+    }, # shared_embedtest
 
     {
       'target_name': 'overlapped-checker',
@@ -1199,24 +1505,36 @@
       ]
     }, # overlapped-checker
     {
+      'target_name': 'nop',
+      'type': 'executable',
+      'sources': [
+        'test/nop/nop.c',
+      ]
+    }, # nop
+    {
       'target_name': 'node_js2c',
       'type': 'executable',
       'toolsets': ['host'],
-      'dependencies': [
-        'deps/simdutf/simdutf.gyp:simdutf#host',
-      ],
       'include_dirs': [
-        'tools'
+        'tools',
+        'src',
       ],
       'sources': [
         'tools/js2c.cc',
-        'tools/executable_wrapper.h'
+        'tools/executable_wrapper.h',
+        'src/embedded_data.h',
+        'src/embedded_data.cc',
+        'src/builtin_info.h',
+        'src/builtin_info.cc',
       ],
       'conditions': [
+        [ 'node_shared_simdutf=="false"', {
+          'dependencies': [ 'tools/v8_gypfiles/v8.gyp:simdutf#host' ],
+        }],
         [ 'node_shared_libuv=="false"', {
           'dependencies': [ 'deps/uv/uv.gyp:libuv#host' ],
         }],
-        [ 'OS in "linux mac"', {
+        [ 'OS in "linux mac openharmony"', {
           'defines': ['NODE_JS2C_USE_STRING_LITERALS'],
         }],
         [ 'debug_node=="true"', {
@@ -1237,9 +1555,6 @@
 
       'dependencies': [
         '<(node_lib_target_name)',
-        'deps/histogram/histogram.gyp:histogram',
-        'deps/uvwasi/uvwasi.gyp:uvwasi',
-        'deps/ada/ada.gyp:ada',
       ],
 
       'includes': [
@@ -1252,7 +1567,6 @@
         'deps/v8/include',
         'deps/cares/include',
         'deps/uv/include',
-        'deps/uvwasi/include',
       ],
 
       'defines': [ 'NODE_WANT_INTERNALS=1' ],
@@ -1262,11 +1576,30 @@
         'tools/snapshot/node_mksnapshot.cc',
       ],
 
+      'msvs_settings': {
+        'VCLinkerTool': {
+          'EnableCOMDATFolding': '1', # /OPT:NOICF
+        },
+      },
+
       'conditions': [
         ['node_write_snapshot_as_array_literals=="true"', {
           'defines': [ 'NODE_MKSNAPSHOT_USE_ARRAY_LITERALS=1' ],
         }],
+        [ 'node_shared_hdr_histogram=="false"', {
+          'dependencies': [
+            'deps/histogram/histogram.gyp:histogram',
+          ],
+        }],
+        [ 'node_shared_nbytes=="false"', {
+          'dependencies': [
+            'deps/nbytes/nbytes.gyp:nbytes',
+          ],
+        }],
         [ 'node_use_openssl=="true"', {
+          'dependencies': [
+            'deps/ncrypto/ncrypto.gyp:ncrypto',
+          ],
           'defines': [
             'HAVE_OPENSSL=1',
           ],

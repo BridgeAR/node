@@ -9,13 +9,19 @@ const bench = common.createBenchmark(main, {
     'Float32Array',
     'Uint32Array',
   ],
-  n: [5e2],
+  n: [25000],
   strict: [0, 1],
   method: [
     'deepEqual',
     'notDeepEqual',
   ],
   len: [1e2, 5e3],
+}, {
+  combinationFilter(p) {
+    return p.strict === 1 ||
+           p.type !== 'Float32Array' ||
+           p.len === 1e2;
+  },
 });
 
 function main({ type, n, len, method, strict }) {

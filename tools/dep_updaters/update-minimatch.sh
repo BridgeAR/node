@@ -17,7 +17,7 @@ NPM="$DEPS_DIR/npm/bin/npm-cli.js"
 . "$BASE_DIR/tools/dep_updaters/utils.sh"
 
 NEW_VERSION=$("$NODE" "$NPM" view minimatch dist-tags.latest)
-CURRENT_VERSION=$("$NODE" "$NPM" --prefix './deps/minimatch' pkg get version)
+CURRENT_VERSION=$("$NODE" -p "require('./deps/minimatch/package.json').version")
 
 # This function exit with 0 if new version and current version are the same
 compare_dependency_version "minimatch" "$NEW_VERSION" "$CURRENT_VERSION"
@@ -54,21 +54,13 @@ cd package
 
 "$NODE" "$NPM" install esbuild --save-dev
 
-"$NODE" "$NPM" pkg set scripts.node-build="esbuild ./dist/cjs/index.js --bundle --platform=node --outfile=index.js"
+"$NODE" "$NPM" pkg set scripts.node-build="esbuild ./dist/commonjs/index.js --bundle --platform=node --outfile=index.js"
 
 "$NODE" "$NPM" run node-build
 
 rm -rf node_modules
 
 mv ./* "$DEPS_DIR/minimatch"
-
-echo "All done!"
-echo ""
-echo "Please git add minimatch, commit the new version:"
-echo ""
-echo "$ git add -A deps/minimatch"
-echo "$ git commit -m \"deps: update minimatch to $NEW_VERSION\""
-echo ""
 
 # Update the version number on maintaining-dependencies.md
 # and print the new version as the last line of the script as we need

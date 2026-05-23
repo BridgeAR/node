@@ -12,18 +12,13 @@
 namespace v8 {
 namespace internal {
 
-class BasicMemoryChunk;
-class MemoryChunk;
+class MemoryChunkMetadata;
+class MutablePageMetadata;
 
 template <typename ConcreteState, AccessMode access_mode>
 class MarkingStateBase {
  public:
-  explicit MarkingStateBase(PtrComprCageBase cage_base)
-#if V8_COMPRESS_POINTERS
-      : cage_base_(cage_base)
-#endif
-  {
-  }
+  explicit MarkingStateBase(const Isolate* isolate);
 
   // The pointer compression cage base value used for decompression of all
   // tagged values except references to InstructionStream objects.
@@ -39,6 +34,9 @@ class MarkingStateBase {
   // Helper method for fully marking an object and accounting its live bytes.
   // Should be used to mark individual objects in one-off cases.
   V8_INLINE bool TryMarkAndAccountLiveBytes(Tagged<HeapObject> obj);
+  // Same, but does not require the object to be initialized.
+  V8_INLINE bool TryMarkAndAccountLiveBytes(Tagged<HeapObject> obj,
+                                            int object_size);
   V8_INLINE bool IsMarked(const Tagged<HeapObject> obj) const;
   V8_INLINE bool IsUnmarked(const Tagged<HeapObject> obj) const;
 
@@ -46,21 +44,21 @@ class MarkingStateBase {
 #if V8_COMPRESS_POINTERS
   const PtrComprCageBase cage_base_;
 #endif  // V8_COMPRESS_POINTERS
+  const Isolate* isolate_;
 };
 
 // This is used by marking visitors.
 class MarkingState final
     : public MarkingStateBase<MarkingState, AccessMode::ATOMIC> {
  public:
-  explicit MarkingState(PtrComprCageBase cage_base)
-      : MarkingStateBase(cage_base) {}
+  explicit MarkingState(const Isolate* isolate) : MarkingStateBase(isolate) {}
 };
 
 class NonAtomicMarkingState final
     : public MarkingStateBase<NonAtomicMarkingState, AccessMode::NON_ATOMIC> {
  public:
-  explicit NonAtomicMarkingState(PtrComprCageBase cage_base)
-      : MarkingStateBase(cage_base) {}
+  explicit NonAtomicMarkingState(const Isolate* isolate)
+      : MarkingStateBase(isolate) {}
 };
 
 }  // namespace internal

@@ -6,11 +6,6 @@ name: Daily WPT report
 
 on:
   workflow_dispatch:
-    inputs:
-      node-versions:
-        description: Node.js versions (as supported by actions/setup-node) to test as JSON array
-        required: false
-        default: '["current", "lts/*", "lts/-1"]'
   schedule:
     # This is 20 minutes after `epochs/daily` branch is triggered to be created
     # in WPT repo.
@@ -18,24 +13,36 @@ on:
     - cron: 30 0 * * *
 
 env:
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: '3.14'
 
 permissions:
   contents: read
 
 jobs:
-  report:
+  collect-versions:
     if: github.repository == 'nodejs/node' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.query.outputs.matrix }}
+    steps:
+      - id: query
+        run: |
+          matrix=$(curl -s https://raw.githubusercontent.com/nodejs/Release/refs/heads/main/schedule.json | jq -c --arg now "$(date +%Y-%m-%d)" '[with_entries(select(.value.end > $now and .value.start < $now)) | keys[] | ltrimstr("v") | tonumber] + ["latest-nightly"]')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+  report:
+    needs:
+      - collect-versions
     strategy:
       matrix:
-        node-version: ${{ fromJSON(github.event.inputs.node-versions || '["latest-nightly", "current", "lts/*", "lts/-1"]') }}
+        node-version: ${{ fromJSON(needs.collect-versions.outputs.matrix) }}
       fail-fast: false
     runs-on: ubuntu-latest
     steps:
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@65d7f2d534ac1bc67fcd62888c5f4f3d2cb2b236  # v4.7.1
+        uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548  # v6.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          allow-prereleases: true
       - name: Environment Information
         run: npx envinfo
 
@@ -45,7 +52,7 @@ jobs:
         run: echo "NIGHTLY=$(curl -s https://nodejs.org/download/nightly/index.json | jq -r '[.[] | select(.files[] | contains("linux-x64"))][0].version')" >> $GITHUB_ENV
       - name: Install Node.js
         id: setup-node
-        uses: actions/setup-node@8f152de45cc393bb48ce5d89d36b731f54556e65  # v4.0.0
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f  # v6.1.0
         with:
           node-version: ${{ env.NIGHTLY || matrix.node-version }}
           check-latest: true
@@ -57,7 +64,7 @@ jobs:
           SHORT_SHA=$(node -p 'process.version.split(/-nightly\d{8}/)[1]')
           echo "NIGHTLY_REF=$(gh api /repos/nodejs/node/commits/$SHORT_SHA --jq '.sha')" >> $GITHUB_ENV
       - name: Checkout ${{ steps.setup-node.outputs.node-version }}
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           persist-credentials: false
           ref: ${{ env.NIGHTLY_REF || steps.setup-node.outputs.node-version }}
@@ -73,7 +80,7 @@ jobs:
         run: rm -rf wpt
         working-directory: test/fixtures
       - name: Checkout epochs/daily WPT
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
           repository: web-platform-tests/wpt
           persist-credentials: false
@@ -89,31 +96,6 @@ jobs:
             echo "WPT_REPORT=$(pwd)/out/wpt/wptreport.json" >> $GITHUB_ENV
           fi
 
-      # undici WPT Runner
-      - name: Set env.UNDICI_VERSION
-        if: ${{ env.WPT_REPORT != '' }}
-        run: echo "UNDICI_VERSION=v$(jq -r '.version' < deps/undici/src/package.json)" >> $GITHUB_ENV
-      - name: Remove deps/undici
-        if: ${{ env.WPT_REPORT != '' }}
-        run: rm -rf deps/undici
-      - name: Checkout undici
-        if: ${{ env.WPT_REPORT != '' }}
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
-        with:
-          repository: nodejs/undici
-          persist-credentials: false
-          path: deps/undici
-          clean: false
-          ref: ${{ env.UNDICI_VERSION }}
-      - name: Add undici WPTs to the report
-        if: ${{ env.WPT_REPORT != '' }}
-        run: |
-          rm -rf test/wpt/tests
-          mv ../../test/fixtures/wpt/ test/wpt/tests/
-          npm install
-          npm run test:wpt || true
-        working-directory: deps/undici
-
       # Upload artifacts
       - name: Clone report for upload
         if: ${{ env.WPT_REPORT != '' }}
@@ -121,10 +103,10 @@ jobs:
         run: cp wptreport.json wptreport-${{ steps.setup-node.outputs.node-version }}.json
       - name: Upload GitHub Actions artifact
         if: ${{ env.WPT_REPORT != '' }}
-        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32  # v3.1.3
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
         with:
           path: out/wpt/wptreport-*.json
-          name: WPT Reports
+          name: WPT Report for ${{ steps.setup-node.outputs.node-version }}
           if-no-files-found: error
       - name: Upload WPT Report to wpt.fyi API
         if: ${{ env.WPT_REPORT != '' }}

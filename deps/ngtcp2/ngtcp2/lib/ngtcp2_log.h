@@ -27,7 +27,7 @@
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #include <ngtcp2/ngtcp2.h>
 
@@ -37,6 +37,9 @@ typedef struct ngtcp2_log {
   /* log_printf is a sink to write log.  NULL means no logging
      output. */
   ngtcp2_printf log_printf;
+  /* events is an event filter.  Only events set in this field are
+     emitted. */
+  uint8_t events;
   /* ts is the time point used to write time delta in the log. */
   ngtcp2_tstamp ts;
   /* last_ts is the most recent time point that this object is
@@ -46,7 +49,7 @@ typedef struct ngtcp2_log {
      log_pritnf. */
   void *user_data;
   /* scid is SCID encoded as NULL-terminated hex string. */
-  uint8_t scid[NGTCP2_MAX_CIDLEN * 2 + 1];
+  char scid[NGTCP2_MAX_CIDLEN * 2 + 1];
 } ngtcp2_log;
 
 /**
@@ -63,27 +66,33 @@ typedef enum ngtcp2_log_event {
   /**
    * :enum:`NGTCP2_LOG_EVENT_CON` is a connection (catch-all) event
    */
-  NGTCP2_LOG_EVENT_CON,
+  NGTCP2_LOG_EVENT_CON = 0x1,
   /**
    * :enum:`NGTCP2_LOG_EVENT_PKT` is a packet event.
    */
-  NGTCP2_LOG_EVENT_PKT,
+  NGTCP2_LOG_EVENT_PKT = 0x2,
   /**
    * :enum:`NGTCP2_LOG_EVENT_FRM` is a QUIC frame event.
    */
-  NGTCP2_LOG_EVENT_FRM,
+  NGTCP2_LOG_EVENT_FRM = 0x4,
   /**
-   * :enum:`NGTCP2_LOG_EVENT_RCV` is a congestion and recovery event.
+   * :enum:`NGTCP2_LOG_EVENT_LDC` is a loss detection and congestion
+   * control event.
    */
-  NGTCP2_LOG_EVENT_RCV,
+  NGTCP2_LOG_EVENT_LDC = 0x8,
   /**
    * :enum:`NGTCP2_LOG_EVENT_CRY` is a crypto event.
    */
-  NGTCP2_LOG_EVENT_CRY,
+  NGTCP2_LOG_EVENT_CRY = 0x10,
   /**
    * :enum:`NGTCP2_LOG_EVENT_PTV` is a path validation event.
    */
-  NGTCP2_LOG_EVENT_PTV,
+  NGTCP2_LOG_EVENT_PTV = 0x20,
+  /**
+   * :enum:`NGTCP2_LOG_EVENT_CCA` is a congestion controller algorithm
+   * event.
+   */
+  NGTCP2_LOG_EVENT_CCA = 0x40,
 } ngtcp2_log_event;
 
 void ngtcp2_log_init(ngtcp2_log *log, const ngtcp2_cid *scid,
@@ -100,7 +109,7 @@ void ngtcp2_log_rx_vn(ngtcp2_log *log, const ngtcp2_pkt_hd *hd,
 
 void ngtcp2_log_rx_sr(ngtcp2_log *log, const ngtcp2_pkt_stateless_reset *sr);
 
-void ngtcp2_log_remote_tp(ngtcp2_log *log, uint8_t exttype,
+void ngtcp2_log_remote_tp(ngtcp2_log *log,
                           const ngtcp2_transport_params *params);
 
 void ngtcp2_log_pkt_lost(ngtcp2_log *log, int64_t pkt_num, uint8_t type,
@@ -112,12 +121,71 @@ void ngtcp2_log_tx_pkt_hd(ngtcp2_log *log, const ngtcp2_pkt_hd *hd);
 
 void ngtcp2_log_tx_cancel(ngtcp2_log *log, const ngtcp2_pkt_hd *hd);
 
+#define NGTCP2_LOG_HD "I%08" PRIu64 " 0x%s %s"
+
+uint64_t ngtcp2_log_timestamp(const ngtcp2_log *log);
+
+static inline const char *ngtcp2_log_event_str(ngtcp2_log_event ev) {
+  switch (ev) {
+  case NGTCP2_LOG_EVENT_CON:
+    return "con";
+  case NGTCP2_LOG_EVENT_PKT:
+    return "pkt";
+  case NGTCP2_LOG_EVENT_FRM:
+    return "frm";
+  case NGTCP2_LOG_EVENT_LDC:
+    return "ldc";
+  case NGTCP2_LOG_EVENT_CRY:
+    return "cry";
+  case NGTCP2_LOG_EVENT_PTV:
+    return "ptv";
+  case NGTCP2_LOG_EVENT_CCA:
+    return "cca";
+  case NGTCP2_LOG_EVENT_NONE:
+  default:
+    return "non";
+  }
+}
+
+#define ngtcp2_log_infof_raw(LOG, EV, FMT, ...)                                \
+  (LOG)->log_printf((LOG)->user_data, NGTCP2_LOG_HD " " FMT,                   \
+                    ngtcp2_log_timestamp(LOG), (LOG)->scid,                    \
+                    ngtcp2_log_event_str(EV), __VA_ARGS__);
+
 /**
  * @function
  *
- * `ngtcp2_log_info` writes info level log.
+ * `ngtcp2_log_infof` writes info level log with printf like
+ * formatting.
  */
-void ngtcp2_log_info(ngtcp2_log *log, ngtcp2_log_event ev, const char *fmt,
-                     ...);
+#define ngtcp2_log_infof(LOG, EV, FMT, ...)                                    \
+  do {                                                                         \
+    if (!(LOG)->log_printf || !((LOG)->events & (EV))) {                       \
+      break;                                                                   \
+    }                                                                          \
+                                                                               \
+    ngtcp2_log_infof_raw((LOG), (EV), FMT, __VA_ARGS__);                       \
+  } while (0)
 
-#endif /* NGTCP2_LOG_H */
+#define ngtcp2_log_info_raw(LOG, EV, FMT)                                      \
+  (LOG)->log_printf((LOG)->user_data, NGTCP2_LOG_HD " " FMT,                   \
+                    ngtcp2_log_timestamp(LOG), (LOG)->scid,                    \
+                    ngtcp2_log_event_str(EV))
+
+/**
+ * @function
+ *
+ * `ngtcp2_log_info` writes info level log.  FMT should not contain
+ * formatting directive.  This function exists to workaround the issue
+ * that __VA_ARGS__ cannot be empty.
+ */
+#define ngtcp2_log_info(LOG, EV, FMT)                                          \
+  do {                                                                         \
+    if (!(LOG)->log_printf || !((LOG)->events & (EV))) {                       \
+      break;                                                                   \
+    }                                                                          \
+                                                                               \
+    ngtcp2_log_info_raw((LOG), (EV), FMT);                                     \
+  } while (0)
+
+#endif /* !defined(NGTCP2_LOG_H) */

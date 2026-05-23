@@ -26,6 +26,10 @@
 #include "src/runtime/runtime-utils.h"
 #include "src/utils/ostreams.h"
 
+#if V8_ENABLE_WEBASSEMBLY
+#include "src/trap-handler/trap-handler-simulator.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
+
 namespace v8 {
 namespace internal {
 
@@ -459,7 +463,7 @@ void Loong64Debugger::Debug() {
           Heap* current_heap = sim_->isolate_->heap();
           if (!skip_obj_print) {
             if (IsSmi(obj) ||
-                IsValidHeapObject(current_heap, HeapObject::cast(obj))) {
+                IsValidHeapObject(current_heap, Cast<HeapObject>(obj))) {
               PrintF(" (");
               if (IsSmi(obj)) {
                 PrintF("smi %d", Smi::ToInt(obj));
@@ -825,7 +829,7 @@ Simulator::Simulator(Isolate* isolate) : isolate_(isolate) {
   // The sp is initialized to point to the bottom (high address) of the
   // allocated stack area. To be safe in potential stack underflows we leave
   // some buffer below.
-  registers_[sp] = stack_ + stack_size - kStackProtectionSize;
+  registers_[sp] = StackBase();
   // The ra and pc are initialized to a known bad value that will cause an
   // access violation if the simulator ever tries to execute it.
   registers_[pc] = bad_ra;
@@ -928,12 +932,12 @@ void Simulator::set_fpu_register_hi_word(int fpureg, int32_t value) {
 
 void Simulator::set_fpu_register_float(int fpureg, float value) {
   DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters));
-  *base::bit_cast<float*>(&FPUregisters_[fpureg]) = value;
+  memcpy(&FPUregisters_[fpureg], &value, sizeof(value));
 }
 
 void Simulator::set_fpu_register_double(int fpureg, double value) {
   DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters));
-  *base::bit_cast<double*>(&FPUregisters_[fpureg]) = value;
+  memcpy(&FPUregisters_[fpureg], &value, sizeof(value));
 }
 
 void Simulator::set_cf_register(int cfreg, bool value) {
@@ -986,12 +990,12 @@ int32_t Simulator::get_fpu_register_hi_word(int fpureg) const {
 
 float Simulator::get_fpu_register_float(int fpureg) const {
   DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters));
-  return *base::bit_cast<float*>(const_cast<int64_t*>(&FPUregisters_[fpureg]));
+  return base::bit_cast<float>(get_fpu_register_word(fpureg));
 }
 
 double Simulator::get_fpu_register_double(int fpureg) const {
   DCHECK((fpureg >= 0) && (fpureg < kNumFPURegisters));
-  return *base::bit_cast<double*>(&FPUregisters_[fpureg]);
+  return base::bit_cast<double>(FPUregisters_[fpureg]);
 }
 
 bool Simulator::get_cf_register(int cfreg) const {
@@ -1662,8 +1666,21 @@ void Simulator::TraceMemWr(int64_t addr, T value) {
   }
 }
 
-// TODO(plind): sign-extend and zero-extend not implmented properly
-// on all the ReadXX functions, I don't think re-interpret cast does it.
+bool Simulator::ProbeMemory(uintptr_t address, uintptr_t access_size) {
+#if V8_ENABLE_WEBASSEMBLY && V8_TRAP_HANDLER_SUPPORTED
+  uintptr_t last_accessed_byte = address + access_size - 1;
+  uintptr_t current_pc = registers_[pc];
+  uintptr_t landing_pad =
+      trap_handler::ProbeMemory(last_accessed_byte, current_pc);
+  if (!landing_pad) return true;
+  set_pc(landing_pad);
+  set_register(kWasmTrapHandlerFaultAddressRegister.code(), current_pc);
+  return false;
+#else
+  return true;
+#endif
+}
+
 int32_t Simulator::ReadW(int64_t addr, Instruction* instr, TraceType t) {
   if (addr >= 0 && addr < 0x400) {
     // This has to be a nullptr-dereference, drop into debugger.
@@ -1672,17 +1689,13 @@ int32_t Simulator::ReadW(int64_t addr, Instruction* instr, TraceType t) {
            addr, reinterpret_cast<intptr_t>(instr));
     DieOrDebug();
   }
-  /* if ((addr & 0x3) == 0)*/ {
+
+  {
     local_monitor_.NotifyLoad();
     int32_t* ptr = reinterpret_cast<int32_t*>(addr);
     TraceMemRd(addr, static_cast<int64_t>(*ptr), t);
     return *ptr;
   }
-  //  PrintF("Unaligned read at 0x%08" PRIx64 " , pc=0x%08" V8PRIxPTR "\n",
-  //  addr,
-  //         reinterpret_cast<intptr_t>(instr));
-  //  DieOrDebug();
-  //  return 0;
 }
 
 uint32_t Simulator::ReadWU(int64_t addr, Instruction* instr) {
@@ -1693,16 +1706,13 @@ uint32_t Simulator::ReadWU(int64_t addr, Instruction* instr) {
            addr, reinterpret_cast<intptr_t>(instr));
     DieOrDebug();
   }
-  // if ((addr & 0x3) == 0) {
-  local_monitor_.NotifyLoad();
-  uint32_t* ptr = reinterpret_cast<uint32_t*>(addr);
-  TraceMemRd(addr, static_cast<int64_t>(*ptr), WORD);
-  return *ptr;
-  // }
-  // PrintF("Unaligned read at 0x%08" PRIx64 " , pc=0x%08" V8PRIxPTR "\n", addr,
-  //        reinterpret_cast<intptr_t>(instr));
-  // DieOrDebug();
-  // return 0;
+
+  {
+    local_monitor_.NotifyLoad();
+    uint32_t* ptr = reinterpret_cast<uint32_t*>(addr);
+    TraceMemRd(addr, static_cast<int64_t>(*ptr), WORD);
+    return *ptr;
+  }
 }
 
 void Simulator::WriteW(int64_t addr, int32_t value, Instruction* instr) {
@@ -1713,7 +1723,8 @@ void Simulator::WriteW(int64_t addr, int32_t value, Instruction* instr) {
            addr, reinterpret_cast<intptr_t>(instr));
     DieOrDebug();
   }
-  /*if ((addr & 0x3) == 0)*/ {
+
+  {
     local_monitor_.NotifyStore();
     base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
     GlobalMonitor::Get()->NotifyStore_Locked(&global_monitor_thread_);
@@ -1722,10 +1733,6 @@ void Simulator::WriteW(int64_t addr, int32_t value, Instruction* instr) {
     *ptr = value;
     return;
   }
-  //  PrintF("Unaligned write at 0x%08" PRIx64 " , pc=0x%08" V8PRIxPTR "\n",
-  //  addr,
-  //         reinterpret_cast<intptr_t>(instr));
-  //  DieOrDebug();
 }
 
 void Simulator::WriteConditionalW(int64_t addr, int32_t value,
@@ -1737,6 +1744,7 @@ void Simulator::WriteConditionalW(int64_t addr, int32_t value,
            addr, reinterpret_cast<intptr_t>(instr));
     DieOrDebug();
   }
+
   if ((addr & 0x3) == 0) {
     base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
     if (local_monitor_.NotifyStoreConditional(addr, TransactionSize::Word) &&
@@ -1766,17 +1774,13 @@ int64_t Simulator::Read2W(int64_t addr, Instruction* instr) {
            addr, reinterpret_cast<intptr_t>(instr));
     DieOrDebug();
   }
-  /*  if ((addr & kPointerAlignmentMask) == 0)*/ {
+
+  {
     local_monitor_.NotifyLoad();
     int64_t* ptr = reinterpret_cast<int64_t*>(addr);
     TraceMemRd(addr, *ptr);
     return *ptr;
   }
-  //  PrintF("Unaligned read at 0x%08" PRIx64 " , pc=0x%08" V8PRIxPTR "\n",
-  //  addr,
-  //         reinterpret_cast<intptr_t>(instr));
-  //  DieOrDebug();
-  //  return 0;
 }
 
 void Simulator::Write2W(int64_t addr, int64_t value, Instruction* instr) {
@@ -1787,7 +1791,8 @@ void Simulator::Write2W(int64_t addr, int64_t value, Instruction* instr) {
            addr, reinterpret_cast<intptr_t>(instr));
     DieOrDebug();
   }
-  /*if ((addr & kPointerAlignmentMask) == 0)*/ {
+
+  {
     local_monitor_.NotifyStore();
     base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
     GlobalMonitor::Get()->NotifyStore_Locked(&global_monitor_thread_);
@@ -1796,10 +1801,6 @@ void Simulator::Write2W(int64_t addr, int64_t value, Instruction* instr) {
     *ptr = value;
     return;
   }
-  //  PrintF("Unaligned write at 0x%08" PRIx64 " , pc=0x%08" V8PRIxPTR "\n",
-  //  addr,
-  //         reinterpret_cast<intptr_t>(instr));
-  //  DieOrDebug();
 }
 
 void Simulator::WriteConditional2W(int64_t addr, int64_t value,
@@ -1811,6 +1812,7 @@ void Simulator::WriteConditional2W(int64_t addr, int64_t value,
            addr, reinterpret_cast<intptr_t>(instr));
     DieOrDebug();
   }
+
   if ((addr & kPointerAlignmentMask) == 0) {
     base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
     if (local_monitor_.NotifyStoreConditional(addr,
@@ -1834,63 +1836,35 @@ void Simulator::WriteConditional2W(int64_t addr, int64_t value,
 }
 
 double Simulator::ReadD(int64_t addr, Instruction* instr) {
-  /*if ((addr & kDoubleAlignmentMask) == 0)*/ {
-    local_monitor_.NotifyLoad();
-    double* ptr = reinterpret_cast<double*>(addr);
-    return *ptr;
-  }
-  // PrintF("Unaligned (double) read at 0x%08" PRIx64 " , pc=0x%08" V8PRIxPTR
-  // "\n",
-  //       addr, reinterpret_cast<intptr_t>(instr));
-  // base::OS::Abort();
-  // return 0;
+  local_monitor_.NotifyLoad();
+  double* ptr = reinterpret_cast<double*>(addr);
+  return *ptr;
 }
 
 void Simulator::WriteD(int64_t addr, double value, Instruction* instr) {
-  /*if ((addr & kDoubleAlignmentMask) == 0)*/ {
-    local_monitor_.NotifyStore();
-    base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
-    GlobalMonitor::Get()->NotifyStore_Locked(&global_monitor_thread_);
-    double* ptr = reinterpret_cast<double*>(addr);
-    *ptr = value;
-    return;
-  }
-  // PrintF("Unaligned (double) write at 0x%08" PRIx64 " , pc=0x%08" V8PRIxPTR
-  //       "\n",
-  //       addr, reinterpret_cast<intptr_t>(instr));
-  // DieOrDebug();
+  local_monitor_.NotifyStore();
+  base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
+  GlobalMonitor::Get()->NotifyStore_Locked(&global_monitor_thread_);
+  double* ptr = reinterpret_cast<double*>(addr);
+  *ptr = value;
+  return;
 }
 
 uint16_t Simulator::ReadHU(int64_t addr, Instruction* instr) {
-  // if ((addr & 1) == 0) {
   local_monitor_.NotifyLoad();
   uint16_t* ptr = reinterpret_cast<uint16_t*>(addr);
   TraceMemRd(addr, static_cast<int64_t>(*ptr));
   return *ptr;
-  // }
-  // PrintF("Unaligned unsigned halfword read at 0x%08" PRIx64
-  //        " , pc=0x%08" V8PRIxPTR "\n",
-  //        addr, reinterpret_cast<intptr_t>(instr));
-  // DieOrDebug();
-  // return 0;
 }
 
 int16_t Simulator::ReadH(int64_t addr, Instruction* instr) {
-  // if ((addr & 1) == 0) {
   local_monitor_.NotifyLoad();
   int16_t* ptr = reinterpret_cast<int16_t*>(addr);
   TraceMemRd(addr, static_cast<int64_t>(*ptr));
   return *ptr;
-  // }
-  // PrintF("Unaligned signed halfword read at 0x%08" PRIx64
-  //        " , pc=0x%08" V8PRIxPTR "\n",
-  //        addr, reinterpret_cast<intptr_t>(instr));
-  // DieOrDebug();
-  // return 0;
 }
 
 void Simulator::WriteH(int64_t addr, uint16_t value, Instruction* instr) {
-  // if ((addr & 1) == 0) {
   local_monitor_.NotifyStore();
   base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
   GlobalMonitor::Get()->NotifyStore_Locked(&global_monitor_thread_);
@@ -1898,15 +1872,9 @@ void Simulator::WriteH(int64_t addr, uint16_t value, Instruction* instr) {
   uint16_t* ptr = reinterpret_cast<uint16_t*>(addr);
   *ptr = value;
   return;
-  // }
-  // PrintF("Unaligned unsigned halfword write at 0x%08" PRIx64
-  //        " , pc=0x%08" V8PRIxPTR "\n",
-  //        addr, reinterpret_cast<intptr_t>(instr));
-  // DieOrDebug();
 }
 
 void Simulator::WriteH(int64_t addr, int16_t value, Instruction* instr) {
-  // if ((addr & 1) == 0) {
   local_monitor_.NotifyStore();
   base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
   GlobalMonitor::Get()->NotifyStore_Locked(&global_monitor_thread_);
@@ -1914,11 +1882,6 @@ void Simulator::WriteH(int64_t addr, int16_t value, Instruction* instr) {
   int16_t* ptr = reinterpret_cast<int16_t*>(addr);
   *ptr = value;
   return;
-  // }
-  // PrintF("Unaligned halfword write at 0x%08" PRIx64 " , pc=0x%08" V8PRIxPTR
-  //        "\n",
-  //        addr, reinterpret_cast<intptr_t>(instr));
-  // DieOrDebug();
 }
 
 uint32_t Simulator::ReadBU(int64_t addr) {
@@ -2000,12 +1963,35 @@ uintptr_t Simulator::StackLimit(uintptr_t c_limit) const {
   return stack_limit_ + kAdditionalStackMargin;
 }
 
-base::Vector<uint8_t> Simulator::GetCurrentStackView() const {
+uintptr_t Simulator::StackBase() const {
+  return reinterpret_cast<uintptr_t>(stack_) + UsableStackSize();
+}
+
+base::Vector<uint8_t> Simulator::GetCentralStackView() const {
   // We do not add an additional safety margin as above in
   // Simulator::StackLimit, as users of this method are expected to add their
   // own margin.
-  return base::VectorOf(reinterpret_cast<uint8_t*>(stack_limit_),
-                        UsableStackSize());
+  return base::VectorOf(
+      reinterpret_cast<uint8_t*>(stack_) + kStackProtectionSize,
+      UsableStackSize());
+}
+
+// We touch the stack, which may or may not have been initialized properly. Msan
+// reports here are not interesting.
+DISABLE_MSAN void Simulator::IterateRegistersAndStack(
+    ::heap::base::StackVisitor* visitor) {
+  for (int i = 0; i < kNumSimuRegisters; ++i) {
+    visitor->VisitPointer(reinterpret_cast<const void*>(get_register(i)));
+  }
+  for (const void* const* current =
+           reinterpret_cast<const void* const*>(get_sp());
+       current < reinterpret_cast<const void* const*>(StackBase()); ++current) {
+    const void* address = *current;
+    if (address == nullptr) {
+      continue;
+    }
+    visitor->VisitPointer(address);
+  }
 }
 
 // Unsupported instructions use Format to print an error and stop execution.
@@ -2033,6 +2019,7 @@ using SimulatorRuntimeCompareCall = int64_t (*)(double darg0, double darg1);
 using SimulatorRuntimeFPFPCall = double (*)(double darg0, double darg1);
 using SimulatorRuntimeFPCall = double (*)(double darg0);
 using SimulatorRuntimeFPIntCall = double (*)(double darg0, int32_t arg0);
+using SimulatorRuntimeIntFPCall = int32_t (*)(double darg0);
 // Define four args for future flexibility; at the time of this writing only
 // one is ever used.
 using SimulatorRuntimeFPTaggedCall = double (*)(int64_t arg0, int64_t arg1,
@@ -2228,34 +2215,8 @@ void Simulator::SoftwareInterrupt() {
         (redirection->type() == ExternalReference::BUILTIN_FP_FP_CALL) ||
         (redirection->type() == ExternalReference::BUILTIN_COMPARE_CALL) ||
         (redirection->type() == ExternalReference::BUILTIN_FP_CALL) ||
-        (redirection->type() == ExternalReference::BUILTIN_FP_INT_CALL);
-
-    {
-      // With the hard floating point calling convention, double
-      // arguments are passed in FPU registers. Fetch the arguments
-      // from there and call the builtin using soft floating point
-      // convention.
-      switch (redirection->type()) {
-        case ExternalReference::BUILTIN_FP_FP_CALL:
-        case ExternalReference::BUILTIN_COMPARE_CALL:
-          arg0 = get_fpu_register(f0);
-          arg1 = get_fpu_register(f1);
-          arg2 = get_fpu_register(f2);
-          arg3 = get_fpu_register(f3);
-          break;
-        case ExternalReference::BUILTIN_FP_CALL:
-          arg0 = get_fpu_register(f0);
-          arg1 = get_fpu_register(f1);
-          break;
-        case ExternalReference::BUILTIN_FP_INT_CALL:
-          arg0 = get_fpu_register(f0);
-          arg1 = get_fpu_register(f1);
-          arg2 = get_register(a2);
-          break;
-        default:
-          break;
-      }
-    }
+        (redirection->type() == ExternalReference::BUILTIN_FP_INT_CALL) ||
+        (redirection->type() == ExternalReference::BUILTIN_INT_FP_CALL);
 
     // Based on CpuFeatures::IsSupported(FPU), Loong64 will use either hardware
     // FPU, or gcc soft-float routines. Hardware FPU is simulated in this
@@ -2286,6 +2247,11 @@ void Simulator::SoftwareInterrupt() {
             PrintF("Call to host function at %p with args %f, %d",
                    reinterpret_cast<void*>(FUNCTION_ADDR(generic_target)),
                    dval0, ival);
+            break;
+          case ExternalReference::BUILTIN_INT_FP_CALL:
+            PrintF("Call to host function at %p with args %f",
+                   reinterpret_cast<void*>(FUNCTION_ADDR(generic_target)),
+                   dval0);
             break;
           default:
             UNREACHABLE();
@@ -2321,12 +2287,20 @@ void Simulator::SoftwareInterrupt() {
           SetFpResult(dresult);
           break;
         }
+        case ExternalReference::BUILTIN_INT_FP_CALL: {
+          SimulatorRuntimeIntFPCall target =
+              reinterpret_cast<SimulatorRuntimeIntFPCall>(external);
+          iresult = target(dval0);
+          set_register(a0, static_cast<int64_t>(iresult));
+          break;
+        }
         default:
           UNREACHABLE();
       }
       if (v8_flags.trace_sim) {
         switch (redirection->type()) {
           case ExternalReference::BUILTIN_COMPARE_CALL:
+          case ExternalReference::BUILTIN_INT_FP_CALL:
             PrintF("Returned %08x\n", static_cast<int32_t>(iresult));
             break;
           case ExternalReference::BUILTIN_FP_FP_CALL:
@@ -2587,8 +2561,8 @@ static T FPUMaxA(T a, T b) {
 
 enum class KeepSign : bool { no = false, yes };
 
-template <typename T, typename std::enable_if<std::is_floating_point<T>::value,
-                                              int>::type = 0>
+template <typename T,
+          typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 T FPUCanonalizeNaNArg(T result, T arg, KeepSign keepSign = KeepSign::no) {
   DCHECK(std::isnan(arg));
   T qNaN = std::numeric_limits<T>::quiet_NaN();
@@ -2626,6 +2600,28 @@ T FPUCanonalizeOperation(Func f, KeepSign keepSign, T first, Args... args) {
     result = FPUCanonalizeNaNArgs(result, keepSign, first, args...);
   }
   return result;
+}
+
+template <typename T>
+T FPProcessNaNBinop(T fp_lhs, T fp_rhs,
+                    const std::function<T(T, T)>& op_for_non_nan) {
+  DCHECK(sizeof(T) == 4 || sizeof(T) == 8);
+  typedef
+      typename std::conditional<sizeof(T) == 4, Float32, Float64>::type FloatT;
+  typedef
+      typename std::conditional<sizeof(T) == 4, uint32_t, uint64_t>::type UintT;
+
+  FloatT lhs = FloatT::FromBits(base::bit_cast<UintT>(fp_lhs));
+  FloatT rhs = FloatT::FromBits(base::bit_cast<UintT>(fp_rhs));
+  if (lhs.is_nan() && !lhs.is_quiet_nan())
+    return lhs.to_quiet_nan().get_scalar();
+  if (rhs.is_nan() && !rhs.is_quiet_nan())
+    return rhs.to_quiet_nan().get_scalar();
+
+  if (lhs.is_nan()) return lhs.get_scalar();
+  if (rhs.is_nan()) return rhs.get_scalar();
+
+  return op_for_non_nan(fp_lhs, fp_rhs);
 }
 
 // Handle execution based on instruction types.
@@ -2839,36 +2835,43 @@ void Simulator::DecodeTypeOp8() {
       printf_instr("LDPTR_W\t %s: %016lx, %s: %016lx, si14: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
+      if (!ProbeMemory(rj() + si14_se, sizeof(int32_t))) return;
       set_register(rd_reg(), ReadW(rj() + si14_se, instr_.instr()));
       break;
     case STPTR_W:
       printf_instr("STPTR_W\t %s: %016lx, %s: %016lx, si14: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
+      if (!ProbeMemory(rj() + si14_se, sizeof(int32_t))) return;
       WriteW(rj() + si14_se, static_cast<int32_t>(rd()), instr_.instr());
       break;
     case LDPTR_D:
       printf_instr("LDPTR_D\t %s: %016lx, %s: %016lx, si14: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
+      if (!ProbeMemory(rj() + si14_se, sizeof(int64_t))) return;
       set_register(rd_reg(), Read2W(rj() + si14_se, instr_.instr()));
       break;
     case STPTR_D:
       printf_instr("STPTR_D\t %s: %016lx, %s: %016lx, si14: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
+      if (!ProbeMemory(rj() + si14_se, sizeof(int64_t))) return;
       Write2W(rj() + si14_se, rd(), instr_.instr());
       break;
     case LL_W: {
       printf_instr("LL_W\t %s: %016lx, %s: %016lx, si14: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
-      base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
       addr = si14_se + rj();
-      set_register(rd_reg(), ReadW(addr, instr_.instr()));
-      local_monitor_.NotifyLoadLinked(addr, TransactionSize::Word);
-      GlobalMonitor::Get()->NotifyLoadLinked_Locked(addr,
-                                                    &global_monitor_thread_);
+      if (!ProbeMemory(addr, sizeof(int32_t))) return;
+      {
+        base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
+        set_register(rd_reg(), ReadW(addr, instr_.instr()));
+        local_monitor_.NotifyLoadLinked(addr, TransactionSize::Word);
+        GlobalMonitor::Get()->NotifyLoadLinked_Locked(addr,
+                                                      &global_monitor_thread_);
+      }
       break;
     }
     case SC_W: {
@@ -2876,6 +2879,7 @@ void Simulator::DecodeTypeOp8() {
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
       addr = si14_se + rj();
+      if (!ProbeMemory(addr, sizeof(int32_t))) return;
       int32_t LLbit = 0;
       WriteConditionalW(addr, static_cast<int32_t>(rd()), instr_.instr(),
                         &LLbit);
@@ -2886,12 +2890,15 @@ void Simulator::DecodeTypeOp8() {
       printf_instr("LL_D\t %s: %016lx, %s: %016lx, si14: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
-      base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
       addr = si14_se + rj();
-      set_register(rd_reg(), Read2W(addr, instr_.instr()));
-      local_monitor_.NotifyLoadLinked(addr, TransactionSize::DoubleWord);
-      GlobalMonitor::Get()->NotifyLoadLinked_Locked(addr,
-                                                    &global_monitor_thread_);
+      if (!ProbeMemory(addr, sizeof(int64_t))) return;
+      {
+        base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
+        set_register(rd_reg(), Read2W(addr, instr_.instr()));
+        local_monitor_.NotifyLoadLinked(addr, TransactionSize::DoubleWord);
+        GlobalMonitor::Get()->NotifyLoadLinked_Locked(addr,
+                                                      &global_monitor_thread_);
+      }
       break;
     }
     case SC_D: {
@@ -2899,6 +2906,7 @@ void Simulator::DecodeTypeOp8() {
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
       addr = si14_se + rj();
+      if (!ProbeMemory(addr, sizeof(int64_t))) return;
       int32_t LLbit = 0;
       WriteConditional2W(addr, rd(), instr_.instr(), &LLbit);
       set_register(rd_reg(), LLbit);
@@ -3036,72 +3044,84 @@ void Simulator::DecodeTypeOp10() {
       printf_instr("LD_B\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(int8_t))) return;
       set_register(rd_reg(), ReadB(rj() + si12_se));
       break;
     case LD_H:
       printf_instr("LD_H\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(int16_t))) return;
       set_register(rd_reg(), ReadH(rj() + si12_se, instr_.instr()));
       break;
     case LD_W:
       printf_instr("LD_W\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(int32_t))) return;
       set_register(rd_reg(), ReadW(rj() + si12_se, instr_.instr()));
       break;
     case LD_D:
       printf_instr("LD_D\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(int64_t))) return;
       set_register(rd_reg(), Read2W(rj() + si12_se, instr_.instr()));
       break;
     case ST_B:
       printf_instr("ST_B\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(int8_t))) return;
       WriteB(rj() + si12_se, static_cast<int8_t>(rd()));
       break;
     case ST_H:
       printf_instr("ST_H\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(int16_t))) return;
       WriteH(rj() + si12_se, static_cast<int16_t>(rd()), instr_.instr());
       break;
     case ST_W:
       printf_instr("ST_W\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(int32_t))) return;
       WriteW(rj() + si12_se, static_cast<int32_t>(rd()), instr_.instr());
       break;
     case ST_D:
       printf_instr("ST_D\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(int64_t))) return;
       Write2W(rj() + si12_se, rd(), instr_.instr());
       break;
     case LD_BU:
       printf_instr("LD_BU\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(uint8_t))) return;
       set_register(rd_reg(), ReadBU(rj() + si12_se));
       break;
     case LD_HU:
       printf_instr("LD_HU\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(uint16_t))) return;
       set_register(rd_reg(), ReadHU(rj() + si12_se, instr_.instr()));
       break;
     case LD_WU:
       printf_instr("LD_WU\t %s: %016lx, %s: %016lx, si12: %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(uint32_t))) return;
       set_register(rd_reg(), ReadWU(rj() + si12_se, instr_.instr()));
       break;
     case FLD_S: {
       printf_instr("FLD_S\t %s: %016f, %s: %016lx, si12: %016lx\n",
                    FPURegisters::Name(fd_reg()), fd_float(),
                    Registers::Name(rj_reg()), rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(float))) return;
       set_fpu_register(fd_reg(), kFPUInvalidResult);  // Trash upper 32 bits.
       set_fpu_register_word(
           fd_reg(), ReadW(rj() + si12_se, instr_.instr(), FLOAT_DOUBLE));
@@ -3111,6 +3131,7 @@ void Simulator::DecodeTypeOp10() {
       printf_instr("FST_S\t %s: %016f, %s: %016lx, si12: %016lx\n",
                    FPURegisters::Name(fd_reg()), fd_float(),
                    Registers::Name(rj_reg()), rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(float))) return;
       int32_t alu_out_32 = static_cast<int32_t>(get_fpu_register(fd_reg()));
       WriteW(rj() + si12_se, alu_out_32, instr_.instr());
       break;
@@ -3119,6 +3140,7 @@ void Simulator::DecodeTypeOp10() {
       printf_instr("FLD_D\t %s: %016f, %s: %016lx, si12: %016lx\n",
                    FPURegisters::Name(fd_reg()), fd_double(),
                    Registers::Name(rj_reg()), rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(double))) return;
       set_fpu_register_double(fd_reg(), ReadD(rj() + si12_se, instr_.instr()));
       TraceMemRd(rj() + si12_se, get_fpu_register(fd_reg()), DOUBLE);
       break;
@@ -3127,6 +3149,7 @@ void Simulator::DecodeTypeOp10() {
       printf_instr("FST_D\t %s: %016f, %s: %016lx, si12: %016lx\n",
                    FPURegisters::Name(fd_reg()), fd_double(),
                    Registers::Name(rj_reg()), rj(), si12_ze);
+      if (!ProbeMemory(rj() + si12_se, sizeof(double))) return;
       WriteD(rj() + si12_se, get_fpu_register_double(fd_reg()), instr_.instr());
       TraceMemWr(rj() + si12_se, get_fpu_register(fd_reg()), DWORD);
       break;
@@ -3893,10 +3916,15 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_float(),
                    FPURegisters::Name(fj_reg()), fj_float(),
                    FPURegisters::Name(fk_reg()), fk_float());
+      typedef float FloatT;
       SetFPUFloatResult(
           fd_reg(),
-          FPUCanonalizeOperation([](float lhs, float rhs) { return lhs + rhs; },
-                                 fj_float(), fk_float()));
+          FPProcessNaNBinop<FloatT>(
+              fj_float(), fk_float(), [](FloatT lhs, FloatT rhs) {
+                if (std::isinf(lhs) && std::isinf(rhs) && (lhs != rhs))
+                  return std::numeric_limits<FloatT>::quiet_NaN();
+                return lhs + rhs;
+              }));
       break;
     }
     case FADD_D: {
@@ -3904,10 +3932,15 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_double(),
                    FPURegisters::Name(fj_reg()), fj_double(),
                    FPURegisters::Name(fk_reg()), fk_double());
-      SetFPUDoubleResult(fd_reg(),
-                         FPUCanonalizeOperation(
-                             [](double lhs, double rhs) { return lhs + rhs; },
-                             fj_double(), fk_double()));
+      typedef double FloatT;
+      SetFPUDoubleResult(
+          fd_reg(),
+          FPProcessNaNBinop<FloatT>(
+              fj_double(), fk_double(), [](FloatT lhs, FloatT rhs) {
+                if (std::isinf(lhs) && std::isinf(rhs) && (lhs != rhs))
+                  return std::numeric_limits<FloatT>::quiet_NaN();
+                return lhs + rhs;
+              }));
       break;
     }
     case FSUB_S: {
@@ -3915,10 +3948,15 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_float(),
                    FPURegisters::Name(fj_reg()), fj_float(),
                    FPURegisters::Name(fk_reg()), fk_float());
+      typedef float FloatT;
       SetFPUFloatResult(
           fd_reg(),
-          FPUCanonalizeOperation([](float lhs, float rhs) { return lhs - rhs; },
-                                 fj_float(), fk_float()));
+          FPProcessNaNBinop<FloatT>(
+              fj_float(), fk_float(), [](FloatT lhs, FloatT rhs) {
+                if (std::isinf(lhs) && std::isinf(rhs) && (lhs == rhs))
+                  return std::numeric_limits<FloatT>::quiet_NaN();
+                return lhs - rhs;
+              }));
       break;
     }
     case FSUB_D: {
@@ -3926,10 +3964,15 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_double(),
                    FPURegisters::Name(fj_reg()), fj_double(),
                    FPURegisters::Name(fk_reg()), fk_double());
-      SetFPUDoubleResult(fd_reg(),
-                         FPUCanonalizeOperation(
-                             [](double lhs, double rhs) { return lhs - rhs; },
-                             fj_double(), fk_double()));
+      typedef double FloatT;
+      SetFPUDoubleResult(
+          fd_reg(),
+          FPProcessNaNBinop<FloatT>(
+              fj_double(), fk_double(), [](FloatT lhs, FloatT rhs) {
+                if (std::isinf(lhs) && std::isinf(rhs) && (lhs == rhs))
+                  return std::numeric_limits<FloatT>::quiet_NaN();
+                return lhs - rhs;
+              }));
       break;
     }
     case FMUL_S: {
@@ -3937,10 +3980,15 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_float(),
                    FPURegisters::Name(fj_reg()), fj_float(),
                    FPURegisters::Name(fk_reg()), fk_float());
-      SetFPUFloatResult(
-          fd_reg(),
-          FPUCanonalizeOperation([](float lhs, float rhs) { return lhs * rhs; },
-                                 fj_float(), fk_float()));
+      typedef float FloatT;
+      SetFPUFloatResult(fd_reg(),
+                        FPProcessNaNBinop<FloatT>(
+                            fj_float(), fk_float(), [](FloatT lhs, FloatT rhs) {
+                              if ((lhs == 0.0 && std::isinf(rhs)) ||
+                                  (rhs == 0.0 && std::isinf(lhs)))
+                                return std::numeric_limits<FloatT>::quiet_NaN();
+                              return lhs * rhs;
+                            }));
       break;
     }
     case FMUL_D: {
@@ -3948,10 +3996,15 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_double(),
                    FPURegisters::Name(fj_reg()), fj_double(),
                    FPURegisters::Name(fk_reg()), fk_double());
-      SetFPUDoubleResult(fd_reg(),
-                         FPUCanonalizeOperation(
-                             [](double lhs, double rhs) { return lhs * rhs; },
-                             fj_double(), fk_double()));
+      typedef double FloatT;
+      SetFPUDoubleResult(
+          fd_reg(), FPProcessNaNBinop<FloatT>(
+                        fj_double(), fk_double(), [](FloatT lhs, FloatT rhs) {
+                          if ((lhs == 0.0 && std::isinf(rhs)) ||
+                              (rhs == 0.0 && std::isinf(lhs)))
+                            return std::numeric_limits<FloatT>::quiet_NaN();
+                          return lhs * rhs;
+                        }));
       break;
     }
     case FDIV_S: {
@@ -3959,10 +4012,15 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_float(),
                    FPURegisters::Name(fj_reg()), fj_float(),
                    FPURegisters::Name(fk_reg()), fk_float());
-      SetFPUFloatResult(
-          fd_reg(),
-          FPUCanonalizeOperation([](float lhs, float rhs) { return lhs / rhs; },
-                                 fj_float(), fk_float()));
+      typedef float FloatT;
+      SetFPUFloatResult(fd_reg(),
+                        FPProcessNaNBinop<FloatT>(
+                            fj_float(), fk_float(), [](FloatT lhs, FloatT rhs) {
+                              if ((std::isinf(lhs) && std::isinf(rhs)) ||
+                                  (rhs == 0.0 && lhs == 0.0))
+                                return std::numeric_limits<FloatT>::quiet_NaN();
+                              return lhs / rhs;
+                            }));
       break;
     }
     case FDIV_D: {
@@ -3970,10 +4028,15 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_double(),
                    FPURegisters::Name(fj_reg()), fj_double(),
                    FPURegisters::Name(fk_reg()), fk_double());
-      SetFPUDoubleResult(fd_reg(),
-                         FPUCanonalizeOperation(
-                             [](double lhs, double rhs) { return lhs / rhs; },
-                             fj_double(), fk_double()));
+      typedef double FloatT;
+      SetFPUDoubleResult(
+          fd_reg(), FPProcessNaNBinop<FloatT>(
+                        fj_double(), fk_double(), [](FloatT lhs, FloatT rhs) {
+                          if ((std::isinf(lhs) && std::isinf(rhs)) ||
+                              (rhs == 0.0 && lhs == 0.0))
+                            return std::numeric_limits<FloatT>::quiet_NaN();
+                          return lhs / rhs;
+                        }));
       break;
     }
     case FMAX_S:
@@ -4036,66 +4099,77 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("LDX_B\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(int8_t))) return;
       set_register(rd_reg(), ReadB(rj() + rk()));
       break;
     case LDX_H:
       printf_instr("LDX_H\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(int16_t))) return;
       set_register(rd_reg(), ReadH(rj() + rk(), instr_.instr()));
       break;
     case LDX_W:
       printf_instr("LDX_W\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(int32_t))) return;
       set_register(rd_reg(), ReadW(rj() + rk(), instr_.instr()));
       break;
     case LDX_D:
       printf_instr("LDX_D\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(int64_t))) return;
       set_register(rd_reg(), Read2W(rj() + rk(), instr_.instr()));
       break;
     case STX_B:
       printf_instr("STX_B\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(int8_t))) return;
       WriteB(rj() + rk(), static_cast<int8_t>(rd()));
       break;
     case STX_H:
       printf_instr("STX_H\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(int16_t))) return;
       WriteH(rj() + rk(), static_cast<int16_t>(rd()), instr_.instr());
       break;
     case STX_W:
       printf_instr("STX_W\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(int32_t))) return;
       WriteW(rj() + rk(), static_cast<int32_t>(rd()), instr_.instr());
       break;
     case STX_D:
       printf_instr("STX_D\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(int64_t))) return;
       Write2W(rj() + rk(), rd(), instr_.instr());
       break;
     case LDX_BU:
       printf_instr("LDX_BU\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(uint8_t))) return;
       set_register(rd_reg(), ReadBU(rj() + rk()));
       break;
     case LDX_HU:
       printf_instr("LDX_HU\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(uint16_t))) return;
       set_register(rd_reg(), ReadHU(rj() + rk(), instr_.instr()));
       break;
     case LDX_WU:
       printf_instr("LDX_WU\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(uint32_t))) return;
       set_register(rd_reg(), ReadWU(rj() + rk(), instr_.instr()));
       break;
     case FLDX_S:
@@ -4103,6 +4177,7 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_float(),
                    Registers::Name(rj_reg()), rj(), Registers::Name(rk_reg()),
                    rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(float))) return;
       set_fpu_register(fd_reg(), kFPUInvalidResult);  // Trash upper 32 bits.
       set_fpu_register_word(fd_reg(),
                             ReadW(rj() + rk(), instr_.instr(), FLOAT_DOUBLE));
@@ -4112,6 +4187,7 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_double(),
                    Registers::Name(rj_reg()), rj(), Registers::Name(rk_reg()),
                    rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(double))) return;
       set_fpu_register_double(fd_reg(), ReadD(rj() + rk(), instr_.instr()));
       break;
     case FSTX_S:
@@ -4119,6 +4195,7 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_float(),
                    Registers::Name(rj_reg()), rj(), Registers::Name(rk_reg()),
                    rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(float))) return;
       WriteW(rj() + rk(), static_cast<int32_t>(get_fpu_register(fd_reg())),
              instr_.instr());
       break;
@@ -4127,6 +4204,7 @@ void Simulator::DecodeTypeOp17() {
                    FPURegisters::Name(fd_reg()), fd_double(),
                    Registers::Name(rj_reg()), rj(), Registers::Name(rk_reg()),
                    rk());
+      if (!ProbeMemory(rj() + rk(), sizeof(double))) return;
       WriteD(rj() + rk(), get_fpu_register_double(fd_reg()), instr_.instr());
       break;
     case AMSWAP_W:
@@ -4187,6 +4265,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMSWAP_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int32_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4204,6 +4283,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMSWAP_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int64_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4220,6 +4300,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMADD_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int32_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4239,6 +4320,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMADD_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int64_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4255,6 +4337,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMAND_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int32_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4274,6 +4357,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMAND_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int64_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4290,6 +4374,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMOR_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int32_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4309,6 +4394,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMOR_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int64_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4325,6 +4411,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMXOR_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int32_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4344,6 +4431,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMXOR_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
+      if (!ProbeMemory(rj(), sizeof(int64_t))) return;
       int32_t success = 0;
       do {
         {
@@ -4384,8 +4472,8 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("DBAR\n");
       break;
     case IBAR:
-      printf("Sim UNIMPLEMENTED: IBAR\n");
-      UNIMPLEMENTED();
+      printf_instr("IBAR\n");
+      break;
     case FSCALEB_S:
       printf("Sim UNIMPLEMENTED: FSCALEB_S\n");
       UNIMPLEMENTED();

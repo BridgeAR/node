@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <optional>
 #include <sstream>
 
 #include "debug-helper-internal.h"
@@ -18,19 +19,13 @@
 
 namespace i = v8::internal;
 
-namespace v8 {
-namespace internal {
-namespace debug_helper_internal {
+namespace v8::internal::debug_helper_internal {
 
-constexpr char kObject[] = "v8::internal::Object";
 constexpr char kTaggedValue[] = "v8::internal::TaggedValue";
 constexpr char kSmi[] = "v8::internal::Smi";
 constexpr char kHeapObject[] = "v8::internal::HeapObject";
-#ifdef V8_COMPRESS_POINTERS
-constexpr char kObjectAsStoredInHeap[] = "v8::internal::TaggedValue";
-#else
-constexpr char kObjectAsStoredInHeap[] = "v8::internal::Object";
-#endif
+constexpr char kObjectAsStoredInHeap[] =
+    "v8::internal::TaggedMember<v8::internal::Object>";
 
 std::string AppendAddressAndType(const std::string& brief, uintptr_t address,
                                  const char* type) {
@@ -97,9 +92,8 @@ TypedObject GetTypedObjectForString(uintptr_t address, i::InstanceType type,
     }
   };
 
-  return i::StringShape(type)
-      .DispatchToSpecificTypeWithoutCast<StringGetDispatcher, TypedObject>(
-          address, type_source);
+  return String::DispatchToSpecificTypeWithoutCast<StringGetDispatcher>(
+      type, address, type_source);
 }
 
 TypedObject GetTypedObjectByInstanceType(uintptr_t address,
@@ -220,7 +214,7 @@ TypedObject GetTypedHeapObject(uintptr_t address, d::MemoryAccessor accessor,
 class ReadStringVisitor : public TqObjectVisitor {
  public:
   struct Result {
-    v8::base::Optional<std::string> maybe_truncated_string;
+    std::optional<std::string> maybe_truncated_string;
     std::unique_ptr<ObjectProperty> maybe_raw_characters_property;
   };
   static Result Visit(d::MemoryAccessor accessor,
@@ -232,7 +226,7 @@ class ReadStringVisitor : public TqObjectVisitor {
   }
 
   // Returns the result as UTF-8 once visiting is complete.
-  v8::base::Optional<std::string> GetString() {
+  std::optional<std::string> GetString() {
     if (failed_) return {};
     std::vector<char> result(
         string_.size() * unibrow::Utf16::kMaxExtraUtf8BytesForOneUtf16CodeUnit);
@@ -255,7 +249,7 @@ class ReadStringVisitor : public TqObjectVisitor {
     DCHECK(size_per_character_ == 1 || size_per_character_ == 2);
     const char* type = size_per_character_ == 1 ? "char" : "char16_t";
     return std::make_unique<ObjectProperty>(
-        "raw_characters", type, type, raw_characters_address_, num_characters_,
+        "raw_characters", type, raw_characters_address_, num_characters_,
         size_per_character_, std::vector<std::unique_ptr<StructProperty>>(),
         d::PropertyKind::kArrayOfKnownSize);
   }
@@ -368,17 +362,22 @@ class ReadStringVisitor : public TqObjectVisitor {
 
   template <typename TChar>
   void ReadExternalString(const TqExternalString* object) {
-    // Cached external strings are easy to read; uncached external strings
-    // require knowledge of the embedder. For now, we only read cached external
-    // strings.
+    // Uncached external strings require knowledge of the embedder. For now, we
+    // only read cached external strings.
     if (IsExternalStringCached(object)) {
       ExternalPointer_t resource_data =
           GetOrFinish(object->GetResourceDataValue(accessor_));
 #ifdef V8_ENABLE_SANDBOX
       Address memory_chunk =
-          BasicMemoryChunk::BaseAddress(object->GetMapAddress());
-      Address heap = GetOrFinish(
-          ReadValue<Address>(memory_chunk + BasicMemoryChunk::kHeapOffset));
+          MemoryChunk::FromAddress(object->GetMapAddress())->address();
+      uint32_t metadata_index = GetOrFinish(ReadValue<uint32_t>(
+          memory_chunk + MemoryChunk::MetadataIndexOffset()));
+      auto metadata_entry =
+          GetOrFinish(ReadValue<IsolateGroup::MemoryChunkMetadataTableEntry>(
+              heap_addresses_.metadata_pointer_table, metadata_index));
+      Address heap = GetOrFinish(ReadValue<Address>(
+          reinterpret_cast<uintptr_t>(metadata_entry.metadata()) +
+          MemoryChunkMetadata::HeapOffset()));
       Isolate* isolate = Isolate::FromHeap(reinterpret_cast<Heap*>(heap));
       Address external_pointer_table_address_address =
           isolate->shared_external_pointer_table_address_address();
@@ -390,7 +389,8 @@ class ReadStringVisitor : public TqObjectVisitor {
           static_cast<int32_t>(resource_data >> kExternalPointerIndexShift);
       Address tagged_data =
           GetOrFinish(ReadValue<Address>(external_pointer_table, index));
-      Address data_address = tagged_data & ~kExternalStringResourceDataTag;
+      // We don't really need to perform the type check here.
+      Address data_address = tagged_data & kExternalPointerPayloadMask;
 #else
       uintptr_t data_address = static_cast<uintptr_t>(resource_data);
 #endif  // V8_ENABLE_SANDBOX
@@ -571,7 +571,7 @@ class AddInfoVisitor : public TqObjectVisitor {
     int num_properties = instance_size.value - start_offset.value;
     if (num_properties > 0) {
       properties_.push_back(std::make_unique<ObjectProperty>(
-          "in-object properties", kObjectAsStoredInHeap, kObject,
+          "in-object properties", kObjectAsStoredInHeap,
           object->GetMapAddress() + start_offset.value * i::kTaggedSize,
           num_properties, i::kTaggedSize,
           std::vector<std::unique_ptr<StructProperty>>(),
@@ -725,8 +725,8 @@ std::unique_ptr<StackFrameResult> GetStackFrame(
     if (!StackFrame::IsTypeMarker(context_or_frame_type)) {
       props.push_back(std::make_unique<ObjectProperty>(
           "currently_executing_jsfunction",
-          CheckTypeName<v8::internal::JSFunction>("v8::internal::JSFunction"),
-          CheckTypeName<v8::internal::JSFunction*>("v8::internal::JSFunction"),
+          CheckTypeName<v8::internal::Tagged<v8::internal::JSFunction>>(
+              "v8::internal::Tagged<v8::internal::JSFunction>"),
           frame_pointer + StandardFrameConstants::kFunctionOffset, 1,
           sizeof(v8::internal::JSFunction),
           std::vector<std::unique_ptr<StructProperty>>(),
@@ -755,12 +755,12 @@ std::unique_ptr<StackFrameResult> GetStackFrame(
                                                 i::InstanceType::SCRIPT_TYPE)) {
               TqScript script(script_ptr.value);
               props.push_back(std::make_unique<ObjectProperty>(
-                  "script_name", kObjectAsStoredInHeap, kObject,
-                  script.GetNameAddress(), 1, i::kTaggedSize,
+                  "script_name", kObjectAsStoredInHeap, script.GetNameAddress(),
+                  1, i::kTaggedSize,
                   std::vector<std::unique_ptr<StructProperty>>(),
                   d::PropertyKind::kSingle));
               props.push_back(std::make_unique<ObjectProperty>(
-                  "script_source", kObjectAsStoredInHeap, kObject,
+                  "script_source", kObjectAsStoredInHeap,
                   script.GetSourceAddress(), 1, i::kTaggedSize,
                   std::vector<std::unique_ptr<StructProperty>>(),
                   d::PropertyKind::kSingle));
@@ -780,7 +780,7 @@ std::unique_ptr<StackFrameResult> GetStackFrame(
               if (indexed_field_slice_function_variable_info.validity ==
                   d::MemoryAccessResult::kOk) {
                 props.push_back(std::make_unique<ObjectProperty>(
-                    "function_name", kObjectAsStoredInHeap, kObject,
+                    "function_name", kObjectAsStoredInHeap,
                     scope_info_address - i::kHeapObjectTag +
                         std::get<1>(
                             indexed_field_slice_function_variable_info.value),
@@ -794,23 +794,16 @@ std::unique_ptr<StackFrameResult> GetStackFrame(
                   position_info_struct_field_list;
               position_info_struct_field_list.push_back(
                   std::make_unique<StructProperty>(
-                      "start", kObjectAsStoredInHeap, kObject, 0, 0, 0));
+                      "start", kObjectAsStoredInHeap, 0, 0, 0));
               position_info_struct_field_list.push_back(
                   std::make_unique<StructProperty>("end", kObjectAsStoredInHeap,
-                                                   kObject, 4, 0, 0));
-              auto indexed_field_slice_position_info =
-                  TqDebugFieldSliceScopeInfoPositionInfo(memory_accessor,
-                                                         scope_info_address);
-              if (indexed_field_slice_position_info.validity ==
-                  d::MemoryAccessResult::kOk) {
-                props.push_back(std::make_unique<ObjectProperty>(
-                    "function_character_offset", "", "",
-                    scope_info_address - i::kHeapObjectTag +
-                        std::get<1>(indexed_field_slice_position_info.value),
-                    std::get<2>(indexed_field_slice_position_info.value),
-                    i::kTaggedSize, std::move(position_info_struct_field_list),
-                    d::PropertyKind::kSingle));
-              }
+                                                   4, 0, 0));
+              TqScopeInfo scope_info(scope_info_address);
+              props.push_back(std::make_unique<ObjectProperty>(
+                  "function_character_offset", "",
+                  scope_info.GetPositionInfoAddress(), 1, 2 * i::kTaggedSize,
+                  std::move(position_info_struct_field_list),
+                  d::PropertyKind::kSingle));
             }
           }
         }
@@ -821,9 +814,7 @@ std::unique_ptr<StackFrameResult> GetStackFrame(
   return std::make_unique<StackFrameResult>(std::move(props));
 }
 
-}  // namespace debug_helper_internal
-}  // namespace internal
-}  // namespace v8
+}  // namespace v8::internal::debug_helper_internal
 
 namespace di = v8::internal::debug_helper_internal;
 

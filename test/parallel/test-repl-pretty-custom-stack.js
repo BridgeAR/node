@@ -1,49 +1,41 @@
 'use strict';
 require('../common');
-const ArrayStream = require('../common/arraystream');
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
-const repl = require('repl');
+const { startNewREPLServer } = require('../common/repl');
 
 const stackRegExp = /(REPL\d+):[0-9]+:[0-9]+/g;
 
 function run({ command, expected }) {
-  let accum = '';
-
-  const inputStream = new ArrayStream();
-  const outputStream = new ArrayStream();
-
-  outputStream.write = (data) => accum += data.replace('\r', '');
-
-  const r = repl.start({
-    prompt: '',
-    input: inputStream,
-    output: outputStream,
+  const { replServer, output } = startNewREPLServer({
     terminal: false,
     useColors: false
+  }, {
+    disableDomainErrorAssert: true,
   });
 
-  r.write(`${command}\n`);
+  replServer.write(`${command}\n`);
   if (typeof expected === 'string') {
     assert.strictEqual(
-      accum.replace(stackRegExp, '$1:*:*'),
+      output.accumulator.replace(stackRegExp, '$1:*:*'),
       expected.replace(stackRegExp, '$1:*:*')
     );
   } else {
     assert.match(
-      accum.replace(stackRegExp, '$1:*:*'),
+      output.accumulator.replace(stackRegExp, '$1:*:*'),
       expected
     );
   }
-  r.close();
+  replServer.close();
 }
 
 const origPrepareStackTrace = Error.prepareStackTrace;
 Error.prepareStackTrace = (err, stack) => {
   if (err instanceof SyntaxError)
     return err.toString();
-  stack.push(err);
-  return stack.reverse().join('--->\n');
+  // Insert the error at the beginning of the stack
+  stack.unshift(err);
+  return stack.join('--->\n');
 };
 
 process.on('uncaughtException', (e) => {
@@ -78,3 +70,10 @@ const tests = [
 ];
 
 tests.forEach(run);
+
+// Verify that the stack can be generated when Error.prepareStackTrace is deleted.
+delete Error.prepareStackTrace;
+run({
+  command: 'throw new TypeError(\'Whoops!\')',
+  expected: 'Uncaught TypeError: Whoops!\n'
+});

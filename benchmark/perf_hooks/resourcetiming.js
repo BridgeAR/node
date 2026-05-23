@@ -21,18 +21,12 @@ function createTimingInfo({
   finalConnectionTimingInfo = null,
 }) {
   if (finalConnectionTimingInfo !== null) {
-    finalConnectionTimingInfo.domainLookupStartTime =
-        finalConnectionTimingInfo.domainLookupStartTime || 0;
-    finalConnectionTimingInfo.domainLookupEndTime =
-        finalConnectionTimingInfo.domainLookupEndTime || 0;
-    finalConnectionTimingInfo.connectionStartTime =
-        finalConnectionTimingInfo.connectionStartTime || 0;
-    finalConnectionTimingInfo.connectionEndTime =
-        finalConnectionTimingInfo.connectionEndTime || 0;
-    finalConnectionTimingInfo.secureConnectionStartTime =
-        finalConnectionTimingInfo.secureConnectionStartTime || 0;
-    finalConnectionTimingInfo.ALPNNegotiatedProtocol =
-        finalConnectionTimingInfo.ALPNNegotiatedProtocol || [];
+    finalConnectionTimingInfo.domainLookupStartTime ||= 0;
+    finalConnectionTimingInfo.domainLookupEndTime ||= 0;
+    finalConnectionTimingInfo.connectionStartTime ||= 0;
+    finalConnectionTimingInfo.connectionEndTime ||= 0;
+    finalConnectionTimingInfo.secureConnectionStartTime ||= 0;
+    finalConnectionTimingInfo.ALPNNegotiatedProtocol ||= [];
   }
   return {
     startTime,
@@ -50,7 +44,7 @@ function createTimingInfo({
 }
 
 const bench = common.createBenchmark(main, {
-  n: [1e5],
+  n: [1e6],
   observe: ['resource'],
 });
 

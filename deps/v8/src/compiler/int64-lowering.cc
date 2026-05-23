@@ -4,15 +4,14 @@
 
 #include "src/compiler/int64-lowering.h"
 
-#include "src/base/v8-fallthrough.h"
 #include "src/compiler/common-operator.h"
 #include "src/compiler/diamond.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/linkage.h"
 #include "src/compiler/machine-operator.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties.h"
 #include "src/compiler/node.h"
+#include "src/compiler/turbofan-graph.h"
 #include "src/compiler/wasm-call-descriptors.h"
 #include "src/compiler/wasm-compiler.h"
 #include "src/wasm/wasm-engine.h"
@@ -27,7 +26,7 @@ namespace v8 {
 namespace internal {
 namespace compiler {
 
-Int64Lowering::Int64Lowering(Graph* graph, MachineOperatorBuilder* machine,
+Int64Lowering::Int64Lowering(TFGraph* graph, MachineOperatorBuilder* machine,
                              CommonOperatorBuilder* common,
                              SimplifiedOperatorBuilder* simplified, Zone* zone,
                              Signature<MachineRepresentation>* signature)
@@ -55,9 +54,10 @@ void Int64Lowering::LowerGraph() {
     NodeState& top = stack_.back();
     if (top.input_index == top.node->InputCount()) {
       // All inputs of top have already been lowered, now lower top.
+      Node* node = top.node;
       stack_.pop_back();
-      state_[top.node->id()] = State::kVisited;
-      LowerNode(top.node);
+      state_[node->id()] = State::kVisited;
+      LowerNode(node);
     } else {
       // Push the next input onto the stack.
       Node* input = top.node->InputAt(top.input_index++);
@@ -671,7 +671,7 @@ void Int64Lowering::LowerNode(Node* node) {
     }
     case IrOpcode::kWord64RolLowerable:
       DCHECK(machine()->Word32Rol().IsSupported());
-      V8_FALLTHROUGH;
+      [[fallthrough]];
     case IrOpcode::kWord64RorLowerable: {
       DCHECK_EQ(3, node->InputCount());
       Node* input = node->InputAt(0);

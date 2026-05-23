@@ -1,7 +1,6 @@
 #pragma once
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
-#if HAVE_OPENSSL && NODE_OPENSSL_HAS_QUIC
 
 #include <aliased_struct.h>
 #include <async_wrap.h>
@@ -12,34 +11,32 @@
 #include <algorithm>
 #include <optional>
 #include "bindingdata.h"
-#include "defs.h"
 #include "packet.h"
 #include "session.h"
 #include "sessionticket.h"
 #include "tokens.h"
 
-namespace node {
-namespace quic {
+namespace node::quic {
 
 // An Endpoint encapsulates the UDP local port binding and is responsible for
 // sending and receiving QUIC packets. A single endpoint can act as both a QUIC
 // client and server simultaneously.
 class Endpoint final : public AsyncWrap, public Packet::Listener {
  public:
-  static constexpr size_t DEFAULT_MAX_CONNECTIONS =
-      std::min<size_t>(kMaxSizeT, static_cast<size_t>(kMaxSafeJsInteger));
-  static constexpr size_t DEFAULT_MAX_CONNECTIONS_PER_HOST = 100;
-  static constexpr size_t DEFAULT_MAX_SOCKETADDRESS_LRU_SIZE =
+  static constexpr uint64_t DEFAULT_MAX_CONNECTIONS =
+      std::min<uint64_t>(kMaxSizeT, kMaxSafeJsInteger);
+  static constexpr uint64_t DEFAULT_MAX_CONNECTIONS_PER_HOST = 100;
+  static constexpr uint64_t DEFAULT_MAX_SOCKETADDRESS_LRU_SIZE =
       (DEFAULT_MAX_CONNECTIONS_PER_HOST * 10);
-  static constexpr size_t DEFAULT_MAX_STATELESS_RESETS = 10;
-  static constexpr size_t DEFAULT_MAX_RETRY_LIMIT = 10;
+  static constexpr uint64_t DEFAULT_MAX_STATELESS_RESETS = 10;
+  static constexpr uint64_t DEFAULT_MAX_RETRY_LIMIT = 10;
 
   // Endpoint configuration options
   struct Options final : public MemoryRetainer {
     // The local socket address to which the UDP port will be bound. The port
     // may be 0 to have Node.js select an available port. IPv6 or IPv4 addresses
     // may be used. When using IPv6, dual mode will be supported by default.
-    SocketAddress local_address;
+    std::shared_ptr<SocketAddress> local_address;
 
     // Retry tokens issued by the Endpoint are time-limited. By default, retry
     // tokens expire after DEFAULT_RETRYTOKEN_EXPIRATION *seconds*. This is an
@@ -84,24 +81,9 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
     // Similar to stateless resets, we enforce a limit on the number of retry
     // packets that can be generated and sent for a remote host. Generating
     // retry packets consumes a modest amount of resources and it's fairly
-    // trivial for a malcious peer to trigger generation of a large number of
+    // trivial for a malicious peer to trigger generation of a large number of
     // retries, so limiting them helps prevent a DOS vector.
     uint64_t max_retries = DEFAULT_MAX_RETRY_LIMIT;
-
-    // The max_payload_size is the maximum size of a serialized QUIC packet. It
-    // should always be set small enough to fit within a single MTU without
-    // fragmentation. The default is set by the QUIC specification at 1200. This
-    // value should not be changed unless you know for sure that the entire path
-    // supports a given MTU without fragmenting at any point in the path.
-    uint64_t max_payload_size = kDefaultMaxPacketLength;
-
-    // The unacknowledged_packet_threshold is the maximum number of
-    // unacknowledged packets that an ngtcp2 session will accumulate before
-    // sending an acknowledgement. Setting this to 0 uses the ngtcp2 defaults,
-    // which is what most will want. The value can be changed to fine tune some
-    // of the performance characteristics of the session. This should only be
-    // changed if you have a really good reason for doing so.
-    uint64_t unacknowledged_packet_threshold = 0;
 
     // The validate_address parameter instructs the Endpoint to perform explicit
     // address validation using retry tokens. This is strongly recommended and
@@ -126,22 +108,15 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
     double tx_loss = 0.0;
 #endif  // DEBUG
 
-    // There are several common congestion control algorithms that ngtcp2 uses
-    // to determine how it manages the flow control window: RENO, CUBIC, BBR,
-    // and BBR2. The details of how each works is not relevant here. The choice
-    // of which to use by default is arbitrary and we can choose whichever we'd
-    // like. Additional performance profiling will be needed to determine which
-    // is the better of the two for our needs.
-    ngtcp2_cc_algo cc_algorithm = NGTCP2_CC_ALGO_CUBIC;
-
-    // By default, when Node.js starts, it will generate a reset_token_secret at
-    // random. This is a secret used in generating stateless reset tokens. In
-    // order for stateless reset to be effective, however, it is necessary to
-    // use a deterministic secret that persists across ngtcp2 endpoints and
-    // sessions.
+    // By default, when the endpoint is created, it will generate a
+    // reset_token_secret at random. This is a secret used in generating
+    // stateless reset tokens. In order for stateless reset to be effective,
+    // however, it is necessary to use a deterministic secret that persists
+    // across ngtcp2 endpoints and sessions. This means that the endpoint
+    // configuration really should have a reset token secret passed in.
     TokenSecret reset_token_secret;
 
-    // The secret used for generating new tokens.
+    // The secret used for generating new regular tokens.
     TokenSecret token_secret;
 
     // When the local_address specifies an IPv6 local address to bind to, the
@@ -164,21 +139,20 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
 
     static v8::Maybe<Options> From(Environment* env,
                                    v8::Local<v8::Value> value);
+
+    std::string ToString() const;
   };
 
-  bool HasInstance(Environment* env, v8::Local<v8::Value> value);
-  static v8::Local<v8::FunctionTemplate> GetConstructorTemplate(
-      Environment* env);
-  static void Initialize(Environment* env, v8::Local<v8::Object> target);
-  static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
-
-  static BaseObjectPtr<Endpoint> Create(Environment* env,
-                                        const Endpoint::Options& config);
+  JS_CONSTRUCTOR(Endpoint);
+  JS_BINDING_INIT_BOILERPLATE();
 
   Endpoint(Environment* env,
            v8::Local<v8::Object> object,
            const Endpoint::Options& options);
-  ~Endpoint() override;
+
+  inline operator Packet::Listener*() {
+    return this;
+  }
 
   inline const Options& options() const {
     return options_;
@@ -199,7 +173,7 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
                                                      const CID& cid) const;
 
   void AddSession(const CID& cid, BaseObjectPtr<Session> session);
-  void RemoveSession(const CID& cid);
+  void RemoveSession(const CID& cid, const SocketAddress& remote_address);
   BaseObjectPtr<Session> FindSession(const CID& cid);
 
   // A single session may be associated with multiple CIDs.
@@ -215,7 +189,7 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
                                     Session* session);
   void DisassociateStatelessResetToken(const StatelessResetToken& token);
 
-  void Send(BaseObjectPtr<Packet> packet);
+  void Send(const BaseObjectPtr<Packet>& packet);
 
   // Generates and sends a retry packet. This is terminal for the connection.
   // Retry packets are used to force explicit path validation by issuing a token
@@ -281,7 +255,7 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
     int Start();
     void Stop();
     void Close();
-    int Send(BaseObjectPtr<Packet> packet);
+    int Send(const BaseObjectPtr<Packet>& packet);
 
     // Returns the local UDP socket address to which we are bound,
     // or fail with an assert if we are not bound.
@@ -289,6 +263,7 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
 
     bool is_bound() const;
     bool is_closed() const;
+    bool is_closed_or_closing() const;
     operator bool() const;
 
     void Ref();
@@ -301,11 +276,10 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
    private:
     class Impl;
 
-    static void CleanupHook(void* data);
-
-    BaseObjectPtr<Impl> impl_;
+    BaseObjectWeakPtr<Impl> impl_;
     bool is_bound_ = false;
     bool is_started_ = false;
+    bool is_closed_ = false;
   };
 
   bool is_closed() const;
@@ -321,7 +295,7 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
   void MaybeDestroy();
 
   // Specifies the general reason the endpoint is being destroyed.
-  enum class CloseContext {
+  enum class CloseContext : uint8_t {
     CLOSE,
     BIND_FAILURE,
     START_FAILURE,
@@ -349,10 +323,9 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
 
   // JavaScript API
 
-  // Create a new Endpoint instance. `createEndpoint()` is exposed as a method
-  // on the internalBinding('quic') object.
+  // Create a new Endpoint.
   // @param Endpoint::Options options - Options to configure the Endpoint.
-  static void CreateEndpoint(const v8::FunctionCallbackInfo<v8::Value>& args);
+  JS_METHOD(New);
 
   // Methods on the Endpoint instance:
 
@@ -363,33 +336,31 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
   // the Session.
   // @param v8::ArrayBufferView remote_transport_params - The remote transport
   // params.
-  static void DoConnect(const v8::FunctionCallbackInfo<v8::Value>& args);
+  JS_METHOD(DoConnect);
 
   // Start listening as a QUIC server
   // @param Session::Options options - Options to configure the Session.
-  static void DoListen(const v8::FunctionCallbackInfo<v8::Value>& args);
+  JS_METHOD(DoListen);
 
   // Mark the Endpoint as busy, temporarily pausing handling of new initial
   // packets.
   // @param bool on - If true, mark the Endpoint as busy.
-  static void MarkBusy(const v8::FunctionCallbackInfo<v8::Value>& args);
+  JS_METHOD(MarkBusy);
+  static void FastMarkBusy(v8::Local<v8::Object> receiver, bool on);
 
   // DoCloseGracefully is the signal that endpoint should close. Any packets
   // that are already in the queue or in flight will be allowed to finish, but
   // the EndpoingWrap will be otherwise no longer able to receive or send
   // packets.
-  static void DoCloseGracefully(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
+  JS_METHOD(DoCloseGracefully);
 
   // Get the local address of the Endpoint.
   // @return node::SocketAddress - The local address of the Endpoint.
-  static void LocalAddress(const v8::FunctionCallbackInfo<v8::Value>& args);
+  JS_METHOD(LocalAddress);
 
   // Ref() causes a listening Endpoint to keep the event loop active.
-  static void Ref(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Unref() allows the event loop to close even if the Endpoint is listening.
-  static void Unref(const v8::FunctionCallbackInfo<v8::Value>& args);
+  JS_METHOD(Ref);
+  static void FastRef(v8::Local<v8::Object> receiver, bool on);
 
   void Receive(const uv_buf_t& buf, const SocketAddress& from);
 
@@ -398,8 +369,12 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
   const Options options_;
   UDP udp_;
 
+  struct ServerState {
+    Session::Options options;
+    std::shared_ptr<TLSContext> tls_context;
+  };
   // Set if/when the endpoint is configured to listen.
-  std::optional<Session::Options> server_options_{};
+  std::optional<ServerState> server_state_ = std::nullopt;
 
   // A Session is generally identified by one or more CIDs. We use two
   // maps for this rather than one to avoid creating a whole bunch of
@@ -433,8 +408,6 @@ class Endpoint final : public AsyncWrap, public Packet::Listener {
   friend class Session;
 };
 
-}  // namespace quic
-}  // namespace node
+}  // namespace node::quic
 
-#endif  // HAVE_OPENSSL && NODE_OPENSSL_HAS_QUIC
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS

@@ -8,8 +8,8 @@
 #endif
 
 #include "node.h"
-#define NAPI_EXPERIMENTAL
 #include "node_api.h"
+#include "quic/guard.h"
 #include "uv.h"
 
 enum {
@@ -30,6 +30,20 @@ static_assert(static_cast<int>(NM_F_LINKED) ==
 #define NODE_BUILTIN_ICU_BINDINGS(V)
 #endif
 
+#if HAVE_OPENSSL && OPENSSL_NO_QUIC != 1
+#define NODE_BUILTIN_QUIC_BINDINGS(V) V(quic)
+#else
+#define NODE_BUILTIN_QUIC_BINDINGS(V)
+#endif
+
+#if HAVE_SQLITE
+#define NODE_BUILTIN_SQLITE_BINDINGS(V)                                        \
+  V(sqlite)                                                                    \
+  V(webstorage)
+#else
+#define NODE_BUILTIN_SQLITE_BINDINGS(V)
+#endif
+
 #define NODE_BINDINGS_WITH_PER_ISOLATE_INIT(V)                                 \
   V(async_wrap)                                                                \
   V(blob)                                                                      \
@@ -38,6 +52,8 @@ static_assert(static_cast<int>(NM_F_LINKED) ==
   V(encoding_binding)                                                          \
   V(fs)                                                                        \
   V(fs_dir)                                                                    \
+  V(http_parser)                                                               \
+  V(locks)                                                                     \
   V(messaging)                                                                 \
   V(mksnapshot)                                                                \
   V(modules)                                                                   \
@@ -47,7 +63,8 @@ static_assert(static_cast<int>(NM_F_LINKED) ==
   V(timers)                                                                    \
   V(url)                                                                       \
   V(worker)                                                                    \
-  NODE_BUILTIN_ICU_BINDINGS(V)
+  NODE_BUILTIN_ICU_BINDINGS(V)                                                 \
+  NODE_BUILTIN_QUIC_BINDINGS(V)
 
 #define NODE_BINDING_CONTEXT_AWARE_CPP(modname, regfunc, priv, flags)          \
   static node::node_module _module = {                                         \

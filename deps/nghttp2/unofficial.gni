@@ -1,8 +1,3 @@
-# Copyright (c) 2013-2019 GitHub Inc.
-# Copyright 2019 the V8 project authors. All rights reserved.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
-
 # This file is used by GN for building, which is NOT the build system used for
 # building official binaries.
 # Please edit the gyp files if you are making changes to build system.
@@ -39,6 +34,9 @@ template("nghttp2_gn_build") {
     if (is_clang || !is_win) {
       cflags_c = [
         "-Wno-implicit-fallthrough",
+        # Ref https://github.com/nghttp2/nghttp2/pull/2258
+        # This can be removed when the above PR is ingested.
+        "-Wno-extra-semi",
       ]
     }
   }

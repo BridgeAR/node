@@ -321,14 +321,14 @@ const theData = 'hello';
     }),
   });
 
-  port1.onmessage = ({ data }) => {
+  port1.onmessage = common.mustCall(({ data }) => {
     const reader = data.getReader();
     assert.rejects(reader.read(), {
       code: 25,
       name: 'DataCloneError',
     }).then(common.mustCall());
     port1.close();
-  };
+  });
 
   port2.postMessage(readable, [readable]);
 
@@ -459,20 +459,37 @@ const theData = 'hello';
 
     const assert = require('assert');
 
-    const tracker = new assert.CallTracker();
-    process.on('exit', () => {
-      tracker.verify();
+    const { mock } = require('node:test');
+
+    // We create an interval to keep the event loop alive while
+    // we wait for the stream read to complete. The reason this is needed is because there's
+    // otherwise nothing to keep the worker thread event loop alive long enough to actually
+    // complete the read from the stream. Under the covers the ReadableStream uses an
+    // unref'd MessagePort to communicate with the main thread. Because the MessagePort
+    // is unref'd, it's existence would not keep the thread alive on its own. There was previously
+    // a bug where this MessagePort was ref'd which would block the thread and main thread
+    // from terminating at all unless the stream was consumed/closed.
+    const i = setInterval(() => {}, 1000);
+
+    const innercb = mock.fn((result) => {
+      assert(!result.done);
+      assert(result.value instanceof Uint8Array);
+      clearInterval(i);
     });
 
-    parentPort.onmessage = tracker.calls(({ data }) => {
+    const cb = mock.fn(({ data }) => {
       assert(isReadableStream(data));
       const reader = data.getReader();
-      reader.read().then(tracker.calls((result) => {
-        assert(!result.done);
-        assert(result.value instanceof Uint8Array);
-      }));
+      reader.read().then(innercb);
       parentPort.close();
     });
+
+    process.on('exit', () => {
+      assert.strictEqual(innercb.mock.callCount(), 1);
+      assert.strictEqual(cb.mock.callCount(), 1);
+    });
+
+    parentPort.onmessage = cb;
     parentPort.onmessageerror = () => assert.fail('should not be called');
   `, { eval: true });
 

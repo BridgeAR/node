@@ -27,7 +27,7 @@
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #include <ngtcp2/ngtcp2.h>
 
@@ -38,25 +38,39 @@ void *ngtcp2_cpymem(void *dest, const void *src, size_t n);
  * the buffer pointed by |dest|.  It returns dest + n;
  */
 uint8_t *ngtcp2_setmem(uint8_t *dest, uint8_t b, size_t n);
+
 /*
- * ngtcp2_encode_hex encodes |data| of length |len| in hex string.  It
- * writes additional NULL bytes at the end of the buffer.  The buffer
- * pointed by |dest| must have at least |len| * 2 + 1 bytes space.
- * This function returns |dest|.
+ * ngtcp2_get_bytes copies |n| bytes from |src| to |dest|, and returns
+ * |src| + |n|.
+ */
+const void *ngtcp2_get_bytes(void *dest, const void *src, size_t n);
+
+/*
+ * ngtcp2_encode_hex encodes |data| of length |len| in hex string.
+ * The buffer pointed by |dest| must have at least |len| * 2 bytes
+ * space.  This function returns |dest| + |len| * 2.
  */
 uint8_t *ngtcp2_encode_hex(uint8_t *dest, const uint8_t *data, size_t len);
 
 /*
- * ngtcp2_encode_ipv4 encodes binary form IPv4 address stored in
+ * ngtcp2_encode_hex_cstr encodes |data| of length |len| in hex
+ * string.  It writes additional NULL bytes at the end of the buffer.
+ * The buffer pointed by |dest| must have at least |len| * 2 + 1 bytes
+ * space.  This function returns |dest|.
+ */
+char *ngtcp2_encode_hex_cstr(char *dest, const uint8_t *data, size_t len);
+
+/*
+ * ngtcp2_encode_ipv4_cstr encodes binary form IPv4 address stored in
  * |addr| to human readable text form in the buffer pointed by |dest|.
  * The capacity of buffer must have enough length to store a text form
  * plus a terminating NULL byte.  The resulting text form ends with
  * NULL byte.  The function returns |dest|.
  */
-uint8_t *ngtcp2_encode_ipv4(uint8_t *dest, const uint8_t *addr);
+char *ngtcp2_encode_ipv4_cstr(char *dest, const uint8_t *addr);
 
 /*
- * ngtcp2_encode_ipv6 encodes binary form IPv6 address stored in
+ * ngtcp2_encode_ipv6_cstr encodes binary form IPv6 address stored in
  * |addr| to human readable text form in the buffer pointed by |dest|.
  * The capacity of buffer must have enough length to store a text form
  * plus a terminating NULL byte.  The resulting text form ends with
@@ -65,7 +79,7 @@ uint8_t *ngtcp2_encode_ipv4(uint8_t *dest, const uint8_t *addr);
  * https://tools.ietf.org/html/rfc5952#section-4.  The function
  * returns |dest|.
  */
-uint8_t *ngtcp2_encode_ipv6(uint8_t *dest, const uint8_t *addr);
+char *ngtcp2_encode_ipv6_cstr(char *dest, const uint8_t *addr);
 
 /*
  * ngtcp2_encode_printable_ascii encodes |data| of length |len| in
@@ -74,8 +88,8 @@ uint8_t *ngtcp2_encode_ipv6(uint8_t *dest, const uint8_t *addr);
  * writes additional NULL bytes at the end of the buffer.  |dest| must
  * have at least |len| + 1 bytes.  This function returns |dest|.
  */
-char *ngtcp2_encode_printable_ascii(char *dest, const uint8_t *data,
-                                    size_t len);
+char *ngtcp2_encode_printable_ascii_cstr(char *dest, const uint8_t *data,
+                                         size_t len);
 
 /*
  * ngtcp2_cmemeq returns nonzero if the first |n| bytes of the buffers
@@ -84,4 +98,12 @@ char *ngtcp2_encode_printable_ascii(char *dest, const uint8_t *data,
  */
 int ngtcp2_cmemeq(const uint8_t *a, const uint8_t *b, size_t n);
 
-#endif /* NGTCP2_STR_H */
+/*
+ * ngtcp2_encode_uint encodes |n| as a decimal integer to the buffer
+ * pointed by |dest|.  This function assumes that the buffer contains
+ * the sufficient capacity to write the number.  This function returns
+ * the pointer to the buffer past the last byte written.
+ */
+uint8_t *ngtcp2_encode_uint(uint8_t *dest, uint64_t n);
+
+#endif /* !defined(NGTCP2_STR_H) */

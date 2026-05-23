@@ -47,6 +47,7 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/LineIterator.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace {
@@ -298,6 +299,12 @@ static void LoadGCCauses() {
   if (gc_causes_loaded) return;
   std::ifstream fin("gccauses");
   std::string mangled, function;
+
+  if (!fin.is_open()) {
+    std::cerr << "failed to open gccauses" << std::endl;
+    std::abort();
+  }
+
   while (!fin.eof()) {
     std::getline(fin, mangled, ',');
     std::getline(fin, function);
@@ -327,6 +334,11 @@ static void LoadGCSuspects() {
   std::ifstream fin("gcsuspects");
   std::string mangled, function;
 
+  if (!fin.is_open()) {
+    std::cerr << "failed to open gcsuspects" << std::endl;
+    std::abort();
+  }
+
   while (!fin.eof()) {
     std::getline(fin, mangled, ',');
     gc_suspects.insert(mangled);
@@ -343,6 +355,11 @@ static void LoadSuspectsAllowList() {
   // TODO(cbruni): clean up once fully migrated
   std::ifstream fin("tools/gcmole/suspects.allowlist");
   std::string s;
+
+  if (!fin.is_open()) {
+    std::cerr << "failed to open suspects.allowlist" << std::endl;
+    std::abort();
+  }
 
   while (fin >> s) suspects_allowlist.insert(s);
 
@@ -643,18 +660,23 @@ static std::string THIS("this");
 
 class FunctionAnalyzer {
  public:
-  FunctionAnalyzer(clang::MangleContext* ctx, clang::CXXRecordDecl* object_decl,
-                   clang::CXXRecordDecl* maybe_object_decl,
+  FunctionAnalyzer(clang::MangleContext* ctx,
+                   clang::CXXRecordDecl* heap_object_decl,
                    clang::CXXRecordDecl* smi_decl,
+                   clang::CXXRecordDecl* tagged_index_decl,
+                   clang::CXXRecordDecl* cleared_weak_value_decl,
                    clang::ClassTemplateDecl* tagged_decl,
                    clang::CXXRecordDecl* no_gc_mole_decl,
+                   clang::CXXRecordDecl* conservative_pinning_scope_decl,
                    clang::DiagnosticsEngine& d, clang::SourceManager& sm)
       : ctx_(ctx),
-        object_decl_(object_decl),
-        maybe_object_decl_(maybe_object_decl),
+        heap_object_decl_(heap_object_decl),
         smi_decl_(smi_decl),
+        tagged_index_decl_(tagged_index_decl),
+        cleared_weak_value_decl_(cleared_weak_value_decl),
         tagged_decl_(tagged_decl),
         no_gc_mole_decl_(no_gc_mole_decl),
+        conservative_pinning_scope_decl_(conservative_pinning_scope_decl),
         d_(d),
         sm_(sm),
         block_(nullptr) {}
@@ -776,7 +798,10 @@ class FunctionAnalyzer {
   IGNORE_EXPR(GNUNullExpr);
   IGNORE_EXPR(OverloadExpr);
 
-  DECL_VISIT_EXPR(CXXThisExpr) { return Use(expr, expr->getType(), THIS, env); }
+  DECL_VISIT_EXPR(CXXThisExpr) {
+    return Use(expr, expr->getType(), THIS,
+               clang::FullSourceLoc(expr->getLocation(), sm_), env);
+  }
 
   DECL_VISIT_EXPR(AbstractConditionalOperator) {
     Environment after_cond = env.ApplyEffect(VisitExpr(expr->getCond(), env));
@@ -922,7 +947,8 @@ class FunctionAnalyzer {
   // 1. If it got stale due to GC since its declaration, we report it as such.
   // 2. Mark its raw usage in the ExprEffect returned by this function.
   ExprEffect Use(const clang::Expr* parent, const clang::QualType& var_type,
-                 const std::string& var_name, const Environment& env) {
+                 const std::string& var_name, clang::FullSourceLoc var_location,
+                 const Environment& env) {
     if (!g_dead_vars_analysis) return ExprEffect::None();
     if (!RepresentsRawPointerType(var_type)) return ExprEffect::None();
     // We currently care only about our internal pointer types and not about
@@ -933,6 +959,7 @@ class FunctionAnalyzer {
     if (!IsInternalPointerType(var_type)) return ExprEffect::None();
     if (env.IsAlive(var_name)) return ExprEffect::None();
     if (HasActiveGuard()) return ExprEffect::None();
+    if (HasActiveConservativePinning(var_location)) return ExprEffect::None();
     ReportUnsafe(parent, DEAD_VAR_MSG);
     return ExprEffect::RawUse();
   }
@@ -940,7 +967,8 @@ class FunctionAnalyzer {
   ExprEffect Use(const clang::Expr* parent, const clang::ValueDecl* var,
                  const Environment& env) {
     if (IsExternalVMState(var)) return ExprEffect::GC();
-    return Use(parent, var->getType(), var->getNameAsString(), env);
+    return Use(parent, var->getType(), var->getNameAsString(),
+               clang::FullSourceLoc(var->getLocation(), sm_), env);
   }
 
   template <typename ExprType>
@@ -1187,6 +1215,17 @@ class FunctionAnalyzer {
 
   DECL_VISIT_STMT(DoStmt) {
     Block block(env, this);
+
+    // Special case `do { ... } while (false);`, which is known to only run
+    // once, and is used in our (D)CHECK macros.
+    if (auto* literal_cond =
+            llvm::dyn_cast<clang::CXXBoolLiteralExpr>(stmt->getCond())) {
+      if (literal_cond->getValue() == false) {
+        block.Loop(stmt->getBody(), stmt->getCond());
+        return block.out();
+      }
+    }
+
     do {
       block.Loop(stmt->getBody(), stmt->getCond());
     } while (block.changed());
@@ -1202,7 +1241,8 @@ class FunctionAnalyzer {
   }
 
   DECL_VISIT_STMT(IfStmt) {
-    Environment cond_out = VisitStmt(stmt->getCond(), env);
+    Environment init_out = VisitStmt(stmt->getInit(), env);
+    Environment cond_out = VisitStmt(stmt->getCond(), init_out);
     Environment then_out = VisitStmt(stmt->getThen(), cond_out);
     Environment else_out = VisitStmt(stmt->getElse(), cond_out);
     return Environment::Merge(then_out, else_out);
@@ -1249,48 +1289,48 @@ class FunctionAnalyzer {
     return (record == base) || record->isDerivedFrom(base);
   }
 
-  // Tagged<T> -> T
-  const clang::CXXRecordDecl* ExtractPointedToTypeIfTagged(
-      const clang::CXXRecordDecl* record) {
-    if (record == nullptr) return nullptr;
-    if (!InV8Namespace(record)) return nullptr;
-    auto* specialization =
-        llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record);
-    if (!specialization) return record;
-    auto* template_decl =
-        specialization->getSpecializedTemplate()->getCanonicalDecl();
-    if (template_decl != tagged_decl_) return record;
-    auto& template_args = specialization->getTemplateArgs();
-    if (template_args.size() != 1) {
-      llvm::errs() << "v8::internal::Tagged<T> should have exactly one "
-                      "template argument\n";
-      specialization->dump(llvm::errs());
-      return nullptr;
-    }
-    if (template_args[0].getKind() != clang::TemplateArgument::Type) {
-      llvm::errs() << "v8::internal::Tagged<T>, T should be a type argument\n";
-      specialization->dump(llvm::errs());
-      return nullptr;
-    }
-    return template_args[0].getAsType()->getAsCXXRecordDecl();
-  }
-
   const clang::CXXRecordDecl* GetDefinitionOrNull(
       const clang::CXXRecordDecl* record) {
-    if (record == nullptr) return nullptr;
+    assert(record);
     if (!InV8Namespace(record)) return nullptr;
     if (!record->hasDefinition()) return nullptr;
     return record->getDefinition();
   }
 
   bool IsDerivedFromInternalPointer(const clang::CXXRecordDecl* record) {
-    record = ExtractPointedToTypeIfTagged(record);
+    if (record == nullptr) return false;
+    if (!InV8Namespace(record)) return false;
+    auto* specialization =
+        llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record);
+    if (specialization) {
+      auto* template_decl =
+          specialization->getSpecializedTemplate()->getCanonicalDecl();
+      if (template_decl == tagged_decl_) {
+        auto& template_args = specialization->getTemplateArgs();
+        if (template_args.size() != 1) {
+          llvm::errs() << "v8::internal::Tagged<T> should have exactly one "
+                          "template argument\n";
+          specialization->dump(llvm::errs());
+          return false;
+        }
+        if (template_args[0].getKind() != clang::TemplateArgument::Type) {
+          llvm::errs()
+              << "v8::internal::Tagged<T>, T should be a type argument\n";
+          specialization->dump(llvm::errs());
+          return false;
+        }
+
+        auto* tagged_type_record =
+            template_args[0].getAsType()->getAsCXXRecordDecl();
+        return tagged_type_record != smi_decl_ &&
+               tagged_type_record != tagged_index_decl_ &&
+               tagged_type_record != cleared_weak_value_decl_;
+      }
+    }
+
     const clang::CXXRecordDecl* definition = GetDefinitionOrNull(record);
     if (!definition) return false;
-    if (IsDerivedFrom(record, object_decl_)) {
-      return !IsDerivedFrom(record, smi_decl_);
-    }
-    if (IsDerivedFrom(record, maybe_object_decl_)) {
+    if (IsDerivedFrom(record, heap_object_decl_)) {
       return true;
     }
     return false;
@@ -1299,7 +1339,8 @@ class FunctionAnalyzer {
   bool IsRawPointerType(const clang::PointerType* type) {
     const clang::CXXRecordDecl* record = type->getPointeeCXXRecordDecl();
     bool result = IsDerivedFromInternalPointer(record);
-    TRACE("is raw " << result << " " << record->getNameAsString());
+    TRACE("is raw " << result << " "
+                    << (record ? record->getNameAsString() : "nullptr"));
     return result;
   }
 
@@ -1328,26 +1369,32 @@ class FunctionAnalyzer {
   }
 
   bool IsGCGuard(clang::QualType qtype) {
-    if (!no_gc_mole_decl_) return false;
-    if (qtype.isNull()) return false;
-    if (qtype->isNullPtrType()) return false;
+    return IsSameType(qtype, no_gc_mole_decl_);
+  }
 
-    const clang::CXXRecordDecl* record = qtype->getAsCXXRecordDecl();
-    const clang::CXXRecordDecl* definition = GetDefinitionOrNull(record);
-
-    if (!definition) return false;
-    return no_gc_mole_decl_ == definition;
+  bool IsConservativePinningScope(clang::QualType qtype) {
+    return IsSameType(qtype, conservative_pinning_scope_decl_);
   }
 
   Environment VisitDecl(clang::Decl* decl, Environment& env) {
     if (clang::VarDecl* var = llvm::dyn_cast<clang::VarDecl>(decl)) {
       Environment out = var->hasInit() ? VisitStmt(var->getInit(), env) : env;
 
-      if (RepresentsRawPointerType(var->getType())) {
+      clang::QualType var_type = var->getType();
+      if (llvm::dyn_cast<clang::ParmVarDecl>(decl) &&
+          var_type->isReferenceType()) {
+        var_type = var_type->getAs<clang::ReferenceType>()->getPointeeType();
+      }
+
+      if (RepresentsRawPointerType(var_type)) {
         out = out.Define(var->getNameAsString());
       }
-      if (IsGCGuard(var->getType())) {
+      if (IsGCGuard(var_type)) {
         scopes_.back().guard_location =
+            clang::FullSourceLoc(decl->getLocation(), sm_);
+      }
+      if (IsConservativePinningScope(var_type)) {
+        scopes_.back().conservative_pinning_scope_location =
             clang::FullSourceLoc(decl->getLocation(), sm_);
       }
 
@@ -1367,12 +1414,14 @@ class FunctionAnalyzer {
     return out;
   }
 
-  void DefineParameters(const clang::FunctionDecl* f, Environment* env) {
-    env->MDefine(THIS);
+  void DefineAndVisitParameters(const clang::FunctionDecl* f,
+                                Environment& env) {
+    env.MDefine(THIS);
     clang::FunctionDecl::param_const_iterator end = f->param_end();
     for (clang::FunctionDecl::param_const_iterator p = f->param_begin();
          p != end; ++p) {
-      env->MDefine((*p)->getNameAsString());
+      env.MDefine((*p)->getNameAsString());
+      VisitDecl(*p, env);
     }
   }
 
@@ -1380,8 +1429,10 @@ class FunctionAnalyzer {
     const clang::FunctionDecl* body = nullptr;
     if (f->hasBody(body)) {
       Environment env;
-      DefineParameters(body, &env);
+      scopes_.push_back(GCScope());
+      DefineAndVisitParameters(body, env);
       VisitStmt(body->getBody(), env);
+      scopes_.pop_back();
       Environment::ClearSymbolTable();
     }
   }
@@ -1395,20 +1446,52 @@ class FunctionAnalyzer {
   void LeaveBlock(Block* block) { block_ = block; }
 
   bool HasActiveGuard() {
-    for (const auto s : scopes_) {
+    for (const auto& s : scopes_) {
       if (s.IsBeforeGCCause()) return true;
     }
     return false;
   }
 
+  bool HasActiveConservativePinning(
+      const clang::FullSourceLoc decl_location) const {
+    for (const auto& s : scopes_) {
+      if (s.IsAfterConservativePinningScope(decl_location)) return true;
+    }
+    return false;
+  }
+
  private:
+  bool IsSameType(clang::QualType qtype, clang::CXXRecordDecl* decl) {
+    if (!decl) return false;
+    if (qtype.isNull() || qtype->isNullPtrType()) return false;
+
+    const clang::CXXRecordDecl* record = qtype->getAsCXXRecordDecl();
+    if (!record) return false;
+
+    return record->getCanonicalDecl() == decl->getCanonicalDecl();
+  }
+
   void ReportUnsafe(const clang::Expr* expr, const std::string& msg) {
-    d_.Report(clang::FullSourceLoc(expr->getExprLoc(), sm_),
+    clang::SourceLocation error_loc =
+        clang::FullSourceLoc(expr->getExprLoc(), sm_);
+    d_.Report(error_loc,
               d_.getCustomDiagID(clang::DiagnosticsEngine::Warning, "%0"))
         << msg;
-    if (scopes_.empty()) return;
-    GCScope scope = scopes_[0];
-    if (!scope.gccause_location.isValid()) return;
+    // Find the relevant GC scope (see HasActiveGuard).
+    const GCScope* pscope = nullptr;
+    for (const auto& s : scopes_) {
+      if (!s.IsBeforeGCCause() && s.gccause_location.isValid()) {
+        pscope = &s;
+        break;
+      }
+    }
+    if (!pscope) {
+      d_.Report(error_loc,
+                d_.getCustomDiagID(clang::DiagnosticsEngine::Note,
+                                   "Could not find GC source location."));
+      return;
+    }
+    const GCScope& scope = *pscope;
     d_.Report(scope.gccause_location,
               d_.getCustomDiagID(clang::DiagnosticsEngine::Note,
                                  "Call might cause unexpected GC."));
@@ -1439,12 +1522,13 @@ class FunctionAnalyzer {
   }
 
   clang::MangleContext* ctx_;
-  clang::CXXRecordDecl* object_decl_;
-  clang::CXXRecordDecl* maybe_object_decl_;
+  clang::CXXRecordDecl* heap_object_decl_;
   clang::CXXRecordDecl* smi_decl_;
+  clang::CXXRecordDecl* tagged_index_decl_;
+  clang::CXXRecordDecl* cleared_weak_value_decl_;
   clang::ClassTemplateDecl* tagged_decl_;
   clang::CXXRecordDecl* no_gc_mole_decl_;
-  clang::CXXRecordDecl* no_heap_access_decl_;
+  clang::CXXRecordDecl* conservative_pinning_scope_decl_;
 
   clang::DiagnosticsEngine& d_;
   clang::SourceManager& sm_;
@@ -1454,6 +1538,7 @@ class FunctionAnalyzer {
   struct GCScope {
     clang::FullSourceLoc guard_location;
     clang::FullSourceLoc gccause_location;
+    clang::FullSourceLoc conservative_pinning_scope_location;
     clang::FunctionDecl* gccause_decl;
 
     // We're only interested in guards that are declared before any further GC
@@ -1462,6 +1547,13 @@ class FunctionAnalyzer {
       if (!guard_location.isValid()) return false;
       if (!gccause_location.isValid()) return true;
       return guard_location.isBeforeInTranslationUnitThan(gccause_location);
+    }
+
+    bool IsAfterConservativePinningScope(
+        const clang::FullSourceLoc decl_location) const {
+      if (!conservative_pinning_scope_location.isValid()) return false;
+      return conservative_pinning_scope_location.isBeforeInTranslationUnitThan(
+          decl_location);
     }
 
     // After we set the first GC cause in the scope, we don't need the later
@@ -1493,16 +1585,23 @@ class ProblemsFinder : public clang::ASTConsumer,
 
   bool TranslationUnitIgnored() {
     if (!ignored_files_loaded_) {
-      std::ifstream fin("tools/gcmole/ignored_files");
-      std::string s;
-      while (fin >> s) ignored_files_.insert(s);
+      auto fileOrError =
+          llvm::MemoryBuffer::getFile("tools/gcmole/ignored_files");
+      if (auto error = fileOrError.getError()) {
+        llvm::errs() << "Failed to open ignored_files file\n";
+        std::terminate();
+      }
+      for (llvm::line_iterator it(*fileOrError->get()); !it.is_at_end(); ++it) {
+        ignored_files_.insert(*it);
+      }
       ignored_files_loaded_ = true;
     }
 
     clang::FileID main_file_id = sm_.getMainFileID();
-    std::string filename = sm_.getFileEntryForID(main_file_id)->getName().str();
+    llvm::StringRef filename =
+        sm_.getFileEntryForID(main_file_id)->tryGetRealPathName();
 
-    bool result = ignored_files_.find(filename) != ignored_files_.end();
+    bool result = ignored_files_.contains(filename);
     if (result) {
       llvm::outs() << "Ignoring file " << filename << "\n";
     }
@@ -1521,43 +1620,56 @@ class ProblemsFinder : public clang::ASTConsumer,
     clang::CXXRecordDecl* no_gc_mole_decl =
         v8_internal.Resolve<clang::CXXRecordDecl>("DisableGCMole");
 
-    clang::CXXRecordDecl* object_decl =
-        v8_internal.Resolve<clang::CXXRecordDecl>("Object");
+    clang::CXXRecordDecl* conservative_pinning_scope_decl =
+        v8_internal.Resolve<clang::CXXRecordDecl>("ConservativePinningScope");
 
-    clang::CXXRecordDecl* maybe_object_decl =
-        v8_internal.Resolve<clang::CXXRecordDecl>("MaybeObject");
+    clang::CXXRecordDecl* heap_object_decl =
+        v8_internal.Resolve<clang::CXXRecordDecl>("HeapObject");
 
     clang::CXXRecordDecl* smi_decl =
         v8_internal.Resolve<clang::CXXRecordDecl>("Smi");
 
+    clang::CXXRecordDecl* tagged_index_decl =
+        v8_internal.Resolve<clang::CXXRecordDecl>("TaggedIndex");
+
+    clang::CXXRecordDecl* cleared_weak_value_decl =
+        v8_internal.Resolve<clang::CXXRecordDecl>("ClearedWeakValue");
+
     clang::ClassTemplateDecl* tagged_decl =
         v8_internal.Resolve<clang::ClassTemplateDecl>("Tagged");
 
-    if (object_decl != nullptr) object_decl = object_decl->getDefinition();
-
-    if (maybe_object_decl != nullptr) {
-      maybe_object_decl = maybe_object_decl->getDefinition();
+    if (heap_object_decl != nullptr) {
+      heap_object_decl = heap_object_decl->getDefinition();
     }
 
-    if (smi_decl != nullptr) smi_decl = smi_decl->getDefinition();
+    if (smi_decl != nullptr) {
+      smi_decl = smi_decl->getDefinition();
+    }
 
-    if (tagged_decl != nullptr) tagged_decl = tagged_decl->getCanonicalDecl();
+    if (tagged_index_decl != nullptr) {
+      tagged_index_decl = tagged_index_decl->getDefinition();
+    }
 
-    if (object_decl != nullptr && smi_decl != nullptr &&
-        maybe_object_decl != nullptr && tagged_decl != nullptr) {
+    if (tagged_decl != nullptr) {
+      tagged_decl = tagged_decl->getCanonicalDecl();
+    }
+
+    if (heap_object_decl != nullptr && smi_decl != nullptr &&
+        tagged_index_decl != nullptr && tagged_decl != nullptr) {
       function_analyzer_ = new FunctionAnalyzer(
-          clang::ItaniumMangleContext::create(ctx, d_), object_decl,
-          maybe_object_decl, smi_decl, tagged_decl, no_gc_mole_decl, d_, sm_);
+          clang::ItaniumMangleContext::create(ctx, d_), heap_object_decl,
+          smi_decl, tagged_index_decl, cleared_weak_value_decl, tagged_decl,
+          no_gc_mole_decl, conservative_pinning_scope_decl, d_, sm_);
       TraverseDecl(ctx.getTranslationUnitDecl());
     } else if (g_verbose) {
-      if (object_decl == nullptr) {
-        llvm::errs() << "Failed to resolve v8::internal::Object\n";
-      }
-      if (maybe_object_decl == nullptr) {
-        llvm::errs() << "Failed to resolve v8::internal::MaybeObject\n";
+      if (heap_object_decl == nullptr) {
+        llvm::errs() << "Failed to resolve v8::internal::HeapObject\n";
       }
       if (smi_decl == nullptr) {
         llvm::errs() << "Failed to resolve v8::internal::Smi\n";
+      }
+      if (tagged_index_decl == nullptr) {
+        llvm::errs() << "Failed to resolve v8::internal::TaggedIndex\n";
       }
       if (tagged_decl == nullptr) {
         llvm::errs() << "Failed to resolve v8::internal::Tagged<T>\n";
@@ -1585,7 +1697,7 @@ class ProblemsFinder : public clang::ASTConsumer,
   clang::SourceManager& sm_;
 
   bool ignored_files_loaded_ = false;
-  std::set<std::string> ignored_files_;
+  llvm::StringSet<> ignored_files_;
 
   FunctionAnalyzer* function_analyzer_;
 };

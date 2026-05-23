@@ -33,8 +33,8 @@ class MemoryMeasurement {
   void FinishProcessing(const NativeContextStats& stats);
 
   static std::unique_ptr<v8::MeasureMemoryDelegate> DefaultDelegate(
-      Isolate* isolate, Handle<NativeContext> context,
-      Handle<JSPromise> promise, v8::MeasureMemoryMode mode);
+      v8::Isolate* isolate, v8::Local<v8::Context> context,
+      v8::Local<v8::Promise::Resolver> promise, v8::MeasureMemoryMode mode);
 
  private:
   static const int kGCTaskDelayInSeconds = 10;
@@ -73,16 +73,8 @@ class V8_EXPORT_PRIVATE NativeContextInferrer {
   // It should be initialized to the context that will be used for the object
   // if the inference is not successful. The function performs more work if the
   // context is the shared context.
-  V8_INLINE bool Infer(Isolate* isolate, Tagged<Map> map,
+  V8_INLINE bool Infer(PtrComprCageBase cage_base, Tagged<Map> map,
                        Tagged<HeapObject> object, Address* native_context);
-
- private:
-  bool InferForContext(Isolate* isolate, Tagged<Context> context,
-                       Address* native_context);
-  bool InferForJSFunction(Isolate* isolate, Tagged<JSFunction> function,
-                          Address* native_context);
-  bool InferForJSObject(Isolate* isolate, Tagged<Map> map,
-                        Tagged<JSObject> object, Address* native_context);
 };
 
 // Maintains mapping from native contexts to their sizes.
