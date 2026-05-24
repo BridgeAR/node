@@ -5,12 +5,12 @@
 #ifndef V8_PARSING_PARSE_INFO_H_
 #define V8_PARSING_PARSE_INFO_H_
 
-#include <map>
 #include <memory>
-#include <vector>
 
-#include "include/v8.h"
+#include "include/v8-callbacks.h"
+#include "src/base/bit-field.h"
 #include "src/base/export-template.h"
+#include "src/base/logging.h"
 #include "src/common/globals.h"
 #include "src/handles/handles.h"
 #include "src/objects/function-kind.h"
@@ -29,105 +29,259 @@ class AccountingAllocator;
 class AstRawString;
 class AstStringConstants;
 class AstValueFactory;
-class CompilerDispatcher;
+class LazyCompileDispatcher;
 class DeclarationScope;
 class FunctionLiteral;
 class RuntimeCallStats;
-class Logger;
+class V8FileLogger;
 class SourceRangeMap;
 class Utf16CharacterStream;
 class Zone;
 
+// The flags for a parse + unoptimized compile operation.
+#define FLAG_FIELDS(V, _)                                       \
+  V(is_toplevel, bool, 1, _)                                    \
+  V(is_eager, bool, 1, _)                                       \
+  V(is_eval, bool, 1, _)                                        \
+  V(is_reparse, bool, 1, _)                                     \
+  V(outer_language_mode, LanguageMode, 1, _)                    \
+  V(parse_restriction, ParseRestriction, 1, _)                  \
+  V(is_module, bool, 1, _)                                      \
+  V(allow_lazy_parsing, bool, 1, _)                             \
+  V(is_lazy_compile, bool, 1, _)                                \
+  V(coverage_enabled, bool, 1, _)                               \
+  V(block_coverage_enabled, bool, 1, _)                         \
+  V(is_asm_wasm_broken, bool, 1, _)                             \
+  V(class_scope_has_private_brand, bool, 1, _)                  \
+  V(private_name_lookup_skips_outer_class, bool, 1, _)          \
+  V(requires_instance_members_initializer, bool, 1, _)          \
+  V(has_static_private_methods_or_accessors, bool, 1, _)        \
+  V(might_always_turbofan, bool, 1, _)                          \
+  V(allow_natives_syntax, bool, 1, _)                           \
+  V(allow_lazy_compile, bool, 1, _)                             \
+  V(post_parallel_compile_tasks_for_eager_toplevel, bool, 1, _) \
+  V(post_parallel_compile_tasks_for_lazy, bool, 1, _)           \
+  V(collect_source_positions, bool, 1, _)                       \
+  V(is_repl_mode, bool, 1, _)                                   \
+  V(produce_compile_hints, bool, 1, _)                          \
+  V(compile_hints_magic_enabled, bool, 1, _)
+
+class V8_EXPORT_PRIVATE UnoptimizedCompileFlags {
+ public:
+  // Set-up flags for a toplevel compilation.
+  static UnoptimizedCompileFlags ForToplevelCompile(Isolate* isolate,
+                                                    bool is_user_javascript,
+                                                    LanguageMode language_mode,
+                                                    REPLMode repl_mode,
+                                                    ScriptType type, bool lazy);
+
+  // Set-up flags for a compiling a particular function (either a lazy compile
+  // or a recompile).
+  static UnoptimizedCompileFlags ForFunctionCompile(
+      Isolate* isolate, Tagged<SharedFunctionInfo> shared);
+
+  // Set-up flags for a full compilation of a given script.
+  static UnoptimizedCompileFlags ForScriptCompile(Isolate* isolate,
+                                                  Tagged<Script> script);
+
+  // Set-up flags for a parallel toplevel function compilation, based on the
+  // flags of an existing toplevel compilation.
+  static UnoptimizedCompileFlags ForToplevelFunction(
+      const UnoptimizedCompileFlags toplevel_flags,
+      const FunctionLiteral* literal);
+
+  // Create flags for a test.
+  static UnoptimizedCompileFlags ForTest(Isolate* isolate);
+
+#define FLAG_GET_SET(NAME, TYPE, SIZE, _)                       \
+  TYPE NAME() const { return BitFields::NAME::decode(flags_); } \
+  UnoptimizedCompileFlags& set_##NAME(TYPE value) {             \
+    flags_ = BitFields::NAME::update(flags_, value);            \
+    return *this;                                               \
+  }
+
+  FLAG_FIELDS(FLAG_GET_SET, _)
+
+  int script_id() const { return script_id_; }
+  UnoptimizedCompileFlags& set_script_id(int value) {
+    script_id_ = value;
+    return *this;
+  }
+
+  FunctionKind function_kind() const { return function_kind_; }
+  UnoptimizedCompileFlags& set_function_kind(FunctionKind value) {
+    function_kind_ = value;
+    return *this;
+  }
+
+  FunctionSyntaxKind function_syntax_kind() const {
+    return function_syntax_kind_;
+  }
+  UnoptimizedCompileFlags& set_function_syntax_kind(FunctionSyntaxKind value) {
+    function_syntax_kind_ = value;
+    return *this;
+  }
+
+  ParsingWhileDebugging parsing_while_debugging() const {
+    return parsing_while_debugging_;
+  }
+  UnoptimizedCompileFlags& set_parsing_while_debugging(
+      ParsingWhileDebugging value) {
+    parsing_while_debugging_ = value;
+    return *this;
+  }
+
+ private:
+  struct BitFields {
+    DEFINE_BIT_FIELDS(FLAG_FIELDS)
+  };
+
+  UnoptimizedCompileFlags(Isolate* isolate, int script_id);
+
+  // Set function info flags based on those in either FunctionLiteral or
+  // SharedFunctionInfo |function|
+  template <typename T>
+  void SetFlagsFromFunction(T function);
+  void SetFlagsForToplevelCompile(bool is_user_javascript,
+                                  LanguageMode language_mode,
+                                  REPLMode repl_mode, ScriptType type,
+                                  bool lazy);
+  void SetFlagsForFunctionFromScript(Tagged<Script> script);
+
+  uint32_t flags_;
+  int script_id_;
+  FunctionKind function_kind_;
+  FunctionSyntaxKind function_syntax_kind_;
+  ParsingWhileDebugging parsing_while_debugging_;
+};
+
+#undef FLAG_FIELDS
+class ParseInfo;
+
+// The mutable state for a parse + unoptimized compile operation.
+class V8_EXPORT_PRIVATE UnoptimizedCompileState {
+ public:
+  const PendingCompilationErrorHandler* pending_error_handler() const {
+    return &pending_error_handler_;
+  }
+  PendingCompilationErrorHandler* pending_error_handler() {
+    return &pending_error_handler_;
+  }
+
+ private:
+  PendingCompilationErrorHandler pending_error_handler_;
+};
+
+// A container for ParseInfo fields that are reusable across multiple parses and
+// unoptimized compiles.
+//
+// Note that this is different from UnoptimizedCompileState, which has mutable
+// state for a single compilation that is not reusable across multiple
+// compilations.
+class V8_EXPORT_PRIVATE ReusableUnoptimizedCompileState {
+ public:
+  explicit ReusableUnoptimizedCompileState(Isolate* isolate);
+  explicit ReusableUnoptimizedCompileState(LocalIsolate* isolate);
+  ~ReusableUnoptimizedCompileState();
+
+  // The AstRawString Zone stores the AstRawStrings in the AstValueFactory that
+  // can be reused across parses, and thereforce should stay alive between
+  // parses that reuse this reusable state and its AstValueFactory.
+  Zone* ast_raw_string_zone() { return &ast_raw_string_zone_; }
+
+  // The single parse Zone stores the data of a single parse, and can be cleared
+  // when that parse completes.
+  //
+  // This is in "reusable" state despite being wiped per-parse, because it
+  // allows us to reuse the Zone itself, and e.g. keep the same single parse
+  // Zone pointer in the AstValueFactory.
+  Zone* single_parse_zone() { return &single_parse_zone_; }
+
+  void NotifySingleParseCompleted() { single_parse_zone_.Reset(); }
+
+  AstValueFactory* ast_value_factory() const {
+    return ast_value_factory_.get();
+  }
+  uint64_t hash_seed() const { return hash_seed_; }
+  AccountingAllocator* allocator() const { return allocator_; }
+  const AstStringConstants* ast_string_constants() const {
+    return ast_string_constants_;
+  }
+  // TODO(cbruni): Switch this back to the main logger.
+  V8FileLogger* v8_file_logger() const { return v8_file_logger_; }
+  LazyCompileDispatcher* dispatcher() const { return dispatcher_; }
+
+ private:
+  uint64_t hash_seed_;
+  AccountingAllocator* allocator_;
+  V8FileLogger* v8_file_logger_;
+  LazyCompileDispatcher* dispatcher_;
+  const AstStringConstants* ast_string_constants_;
+  Zone ast_raw_string_zone_;
+  Zone single_parse_zone_;
+  std::unique_ptr<AstValueFactory> ast_value_factory_;
+};
+
 // A container for the inputs, configuration options, and outputs of parsing.
 class V8_EXPORT_PRIVATE ParseInfo {
  public:
-  explicit ParseInfo(Isolate*);
-  ParseInfo(Isolate* isolate, Script script);
-  ParseInfo(Isolate* isolate, SharedFunctionInfo shared);
-
-  // Creates a new parse info based on parent top-level |outer_parse_info| for
-  // function |literal|.
-  static std::unique_ptr<ParseInfo> FromParent(
-      const ParseInfo* outer_parse_info, AccountingAllocator* zone_allocator,
-      const FunctionLiteral* literal, const AstRawString* function_name);
+  ParseInfo(Isolate* isolate, const UnoptimizedCompileFlags flags,
+            UnoptimizedCompileState* state,
+            ReusableUnoptimizedCompileState* reusable_state);
+  ParseInfo(LocalIsolate* isolate, const UnoptimizedCompileFlags flags,
+            UnoptimizedCompileState* state,
+            ReusableUnoptimizedCompileState* reusable_state,
+            uintptr_t stack_limit);
 
   ~ParseInfo();
 
-  template <typename LocalIsolate>
+  template <typename IsolateT>
   EXPORT_TEMPLATE_DECLARE(V8_EXPORT_PRIVATE)
-  Handle<Script> CreateScript(LocalIsolate* isolate, Handle<String> source,
+  Handle<Script> CreateScript(IsolateT* isolate, Handle<String> source,
+                              MaybeHandle<FixedArray> maybe_wrapped_arguments,
                               ScriptOriginOptions origin_options,
                               NativesFlag natives = NOT_NATIVES_CODE);
 
-  // Either returns the ast-value-factory associcated with this ParseInfo, or
-  // creates and returns a new factory if none exists.
-  AstValueFactory* GetOrCreateAstValueFactory();
+  Zone* zone() const { return reusable_state_->single_parse_zone(); }
 
-  Zone* zone() const { return zone_.get(); }
+  const UnoptimizedCompileFlags& flags() const { return flags_; }
 
-// Convenience accessor methods for flags.
-#define FLAG_ACCESSOR(flag, getter, setter)     \
-  bool getter() const { return GetFlag(flag); } \
-  void setter() { SetFlag(flag); }              \
-  void setter(bool val) { SetFlag(flag, val); }
+  // Getters for reusable state.
+  uint64_t hash_seed() const { return reusable_state_->hash_seed(); }
+  AccountingAllocator* allocator() const {
+    return reusable_state_->allocator();
+  }
+  const AstStringConstants* ast_string_constants() const {
+    return reusable_state_->ast_string_constants();
+  }
+  V8FileLogger* v8_file_logger() const {
+    return reusable_state_->v8_file_logger();
+  }
+  LazyCompileDispatcher* dispatcher() const {
+    return reusable_state_->dispatcher();
+  }
+  const UnoptimizedCompileState* state() const { return state_; }
 
-  FLAG_ACCESSOR(kToplevel, is_toplevel, set_toplevel)
-  FLAG_ACCESSOR(kEager, is_eager, set_eager)
-  FLAG_ACCESSOR(kEval, is_eval, set_eval)
-  FLAG_ACCESSOR(kStrictMode, is_strict_mode, set_strict_mode)
-  FLAG_ACCESSOR(kModule, is_module, set_module)
-  FLAG_ACCESSOR(kAllowLazyParsing, allow_lazy_parsing, set_allow_lazy_parsing)
-  FLAG_ACCESSOR(kLazyCompile, lazy_compile, set_lazy_compile)
-  FLAG_ACCESSOR(kCollectTypeProfile, collect_type_profile,
-                set_collect_type_profile)
-  FLAG_ACCESSOR(kIsAsmWasmBroken, is_asm_wasm_broken, set_asm_wasm_broken)
-  FLAG_ACCESSOR(kContainsAsmModule, contains_asm_module,
-                set_contains_asm_module)
-  FLAG_ACCESSOR(kCoverageEnabled, coverage_enabled, set_coverage_enabled)
-  FLAG_ACCESSOR(kBlockCoverageEnabled, block_coverage_enabled,
-                set_block_coverage_enabled)
-  FLAG_ACCESSOR(kAllowEvalCache, allow_eval_cache, set_allow_eval_cache)
-  FLAG_ACCESSOR(kRequiresInstanceMembersInitializer,
-                requires_instance_members_initializer,
-                set_requires_instance_members_initializer)
-  FLAG_ACCESSOR(kClassScopeHasPrivateBrand, class_scope_has_private_brand,
-                set_class_scope_has_private_brand)
-  FLAG_ACCESSOR(kHasStaticPrivateMethodsOrAccessors,
-                has_static_private_methods_or_accessors,
-                set_has_static_private_methods_or_accessors)
-  FLAG_ACCESSOR(kMightAlwaysOpt, might_always_opt, set_might_always_opt)
-  FLAG_ACCESSOR(kAllowNativeSyntax, allow_natives_syntax,
-                set_allow_natives_syntax)
-  FLAG_ACCESSOR(kAllowLazyCompile, allow_lazy_compile, set_allow_lazy_compile)
-  FLAG_ACCESSOR(kAllowNativeSyntax, allow_native_syntax,
-                set_allow_native_syntax)
-  FLAG_ACCESSOR(kAllowHarmonyDynamicImport, allow_harmony_dynamic_import,
-                set_allow_harmony_dynamic_import)
-  FLAG_ACCESSOR(kAllowHarmonyImportMeta, allow_harmony_import_meta,
-                set_allow_harmony_import_meta)
-  FLAG_ACCESSOR(kAllowHarmonyOptionalChaining, allow_harmony_optional_chaining,
-                set_allow_harmony_optional_chaining)
-  FLAG_ACCESSOR(kAllowHarmonyPrivateMethods, allow_harmony_private_methods,
-                set_allow_harmony_private_methods)
-  FLAG_ACCESSOR(kIsOneshotIIFE, is_oneshot_iife, set_is_oneshot_iife)
-  FLAG_ACCESSOR(kCollectSourcePositions, collect_source_positions,
-                set_collect_source_positions)
-  FLAG_ACCESSOR(kAllowHarmonyNullish, allow_harmony_nullish,
-                set_allow_harmony_nullish)
-  FLAG_ACCESSOR(kAllowHarmonyTopLevelAwait, allow_harmony_top_level_await,
-                set_allow_harmony_top_level_await)
-  FLAG_ACCESSOR(kREPLMode, is_repl_mode, set_repl_mode)
-
-#undef FLAG_ACCESSOR
-
-  void set_parse_restriction(ParseRestriction restriction) {
-    SetFlag(kParseRestriction, restriction != NO_PARSE_RESTRICTION);
+  // Getters for state.
+  PendingCompilationErrorHandler* pending_error_handler() {
+    return state_->pending_error_handler();
   }
 
-  ParseRestriction parse_restriction() const {
-    return GetFlag(kParseRestriction) ? ONLY_SINGLE_FUNCTION_LITERAL
-                                      : NO_PARSE_RESTRICTION;
-  }
+  // Accessors for per-thread state.
+  uintptr_t stack_limit() const { return stack_limit_; }
+  RuntimeCallStats* runtime_call_stats() const { return runtime_call_stats_; }
+
+  // Accessor methods for output flags.
+  bool allow_eval_cache() const { return allow_eval_cache_; }
+  void set_allow_eval_cache(bool value) { allow_eval_cache_ = value; }
+
+#if V8_ENABLE_WEBASSEMBLY
+  bool contains_asm_module() const { return contains_asm_module_; }
+  void set_contains_asm_module(bool value) { contains_asm_module_ = value; }
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+  LanguageMode language_mode() const { return language_mode_; }
+  void set_language_mode(LanguageMode value) { language_mode_ = value; }
 
   Utf16CharacterStream* character_stream() const {
     return character_stream_.get();
@@ -152,8 +306,7 @@ class V8_EXPORT_PRIVATE ParseInfo {
   }
 
   AstValueFactory* ast_value_factory() const {
-    DCHECK(ast_value_factory_.get());
-    return ast_value_factory_.get();
+    return reusable_state_->ast_value_factory();
   }
 
   const AstRawString* function_name() const { return function_name_; }
@@ -166,44 +319,13 @@ class V8_EXPORT_PRIVATE ParseInfo {
 
   DeclarationScope* scope() const;
 
-  uintptr_t stack_limit() const { return stack_limit_; }
-  void set_stack_limit(uintptr_t stack_limit) { stack_limit_ = stack_limit; }
-
-  uint64_t hash_seed() const { return hash_seed_; }
-  void set_hash_seed(uint64_t hash_seed) { hash_seed_ = hash_seed; }
-
-  int start_position() const { return start_position_; }
-  void set_start_position(int start_position) {
-    start_position_ = start_position;
-  }
-
-  int end_position() const { return end_position_; }
-  void set_end_position(int end_position) { end_position_ = end_position; }
-
   int parameters_end_pos() const { return parameters_end_pos_; }
   void set_parameters_end_pos(int parameters_end_pos) {
     parameters_end_pos_ = parameters_end_pos;
   }
 
-  int function_literal_id() const { return function_literal_id_; }
-  void set_function_literal_id(int function_literal_id) {
-    function_literal_id_ = function_literal_id;
-  }
-
-  FunctionKind function_kind() const { return function_kind_; }
-  void set_function_kind(FunctionKind function_kind) {
-    function_kind_ = function_kind;
-  }
-
-  FunctionSyntaxKind function_syntax_kind() const {
-    return function_syntax_kind_;
-  }
-  void set_function_syntax_kind(FunctionSyntaxKind function_syntax_kind) {
-    function_syntax_kind_ = function_syntax_kind;
-  }
-
   bool is_wrapped_as_function() const {
-    return function_syntax_kind() == FunctionSyntaxKind::kWrapped;
+    return flags().function_syntax_kind() == FunctionSyntaxKind::kWrapped;
   }
 
   int max_function_literal_id() const { return max_function_literal_id_; }
@@ -211,163 +333,74 @@ class V8_EXPORT_PRIVATE ParseInfo {
     max_function_literal_id_ = max_function_literal_id;
   }
 
-  const AstStringConstants* ast_string_constants() const {
-    return ast_string_constants_;
-  }
-  void set_ast_string_constants(
-      const AstStringConstants* ast_string_constants) {
-    ast_string_constants_ = ast_string_constants;
-  }
-
-  RuntimeCallStats* runtime_call_stats() const { return runtime_call_stats_; }
-  void set_runtime_call_stats(RuntimeCallStats* runtime_call_stats) {
-    runtime_call_stats_ = runtime_call_stats;
-  }
-  Logger* logger() const { return logger_; }
-  void set_logger(Logger* logger) { logger_ = logger; }
-
   void AllocateSourceRangeMap();
   SourceRangeMap* source_range_map() const { return source_range_map_; }
   void set_source_range_map(SourceRangeMap* source_range_map) {
     source_range_map_ = source_range_map;
   }
 
-  PendingCompilationErrorHandler* pending_error_handler() {
-    return &pending_error_handler_;
+  void CheckFlagsForFunctionFromScript(Tagged<Script> script);
+
+  bool is_background_compilation() const { return is_background_compilation_; }
+
+  void set_is_background_compilation() { is_background_compilation_ = true; }
+
+  bool is_streaming_compilation() const { return is_streaming_compilation_; }
+
+  void set_is_streaming_compilation() { is_streaming_compilation_ = true; }
+
+  void SetCompileHintCallbackAndData(CompileHintCallback callback, void* data) {
+    DCHECK_NULL(compile_hint_callback_);
+    DCHECK_NULL(compile_hint_callback_data_);
+    compile_hint_callback_ = callback;
+    compile_hint_callback_data_ = data;
   }
 
-  class ParallelTasks {
-   public:
-    explicit ParallelTasks(CompilerDispatcher* compiler_dispatcher)
-        : dispatcher_(compiler_dispatcher) {
-      DCHECK(dispatcher_);
-    }
-
-    void Enqueue(ParseInfo* outer_parse_info, const AstRawString* function_name,
-                 FunctionLiteral* literal);
-
-    using EnqueuedJobsIterator =
-        std::forward_list<std::pair<FunctionLiteral*, uintptr_t>>::iterator;
-
-    EnqueuedJobsIterator begin() { return enqueued_jobs_.begin(); }
-    EnqueuedJobsIterator end() { return enqueued_jobs_.end(); }
-
-    CompilerDispatcher* dispatcher() { return dispatcher_; }
-
-   private:
-    CompilerDispatcher* dispatcher_;
-    std::forward_list<std::pair<FunctionLiteral*, uintptr_t>> enqueued_jobs_;
-  };
-
-  ParallelTasks* parallel_tasks() { return parallel_tasks_.get(); }
-
-  void SetFlagsForToplevelCompile(bool is_collecting_type_profile,
-                                  bool is_user_javascript,
-                                  LanguageMode language_mode,
-                                  REPLMode repl_mode);
-
-  void CheckFlagsForFunctionFromScript(Script script);
-
-  int script_id() const { return script_id_; }
-  //--------------------------------------------------------------------------
-
-  LanguageMode language_mode() const {
-    return construct_language_mode(is_strict_mode());
+  CompileHintCallback compile_hint_callback() const {
+    return compile_hint_callback_;
   }
-  void set_language_mode(LanguageMode language_mode) {
-    STATIC_ASSERT(LanguageModeSize == 2);
-    set_strict_mode(is_strict(language_mode));
+
+  void* compile_hint_callback_data() const {
+    return compile_hint_callback_data_;
   }
 
  private:
-  ParseInfo(AccountingAllocator* zone_allocator, int script_id);
-  ParseInfo(Isolate*, AccountingAllocator* zone_allocator, int script_id);
+  ParseInfo(const UnoptimizedCompileFlags flags, UnoptimizedCompileState* state,
+            ReusableUnoptimizedCompileState* reusable_state,
+            uintptr_t stack_limit, RuntimeCallStats* runtime_call_stats);
 
-  void SetFlagsForFunctionFromScript(Script script);
-
-  template <typename LocalIsolate>
-  void SetFlagsForToplevelCompileFromScript(LocalIsolate* isolate,
-                                            Script script,
-                                            bool is_collecting_type_profile);
-  void CheckFlagsForToplevelCompileFromScript(Script script,
-                                              bool is_collecting_type_profile);
-
-  // Set function info flags based on those in either FunctionLiteral or
-  // SharedFunctionInfo |function|
-  template <typename T>
-  void SetFunctionInfo(T function);
-
-  // Various configuration flags for parsing.
-  enum Flag : uint32_t {
-    // ---------- Input flags ---------------------------
-    kToplevel = 1u << 0,
-    kEager = 1u << 1,
-    kEval = 1u << 2,
-    kStrictMode = 1u << 3,
-    kNative = 1u << 4,
-    kParseRestriction = 1u << 5,
-    kModule = 1u << 6,
-    kAllowLazyParsing = 1u << 7,
-    kLazyCompile = 1u << 8,
-    kCollectTypeProfile = 1u << 9,
-    kCoverageEnabled = 1u << 10,
-    kBlockCoverageEnabled = 1u << 11,
-    kIsAsmWasmBroken = 1u << 12,
-    kAllowEvalCache = 1u << 13,
-    kRequiresInstanceMembersInitializer = 1u << 14,
-    kContainsAsmModule = 1u << 15,
-    kMightAlwaysOpt = 1u << 16,
-    kAllowLazyCompile = 1u << 17,
-    kAllowNativeSyntax = 1u << 18,
-    kAllowHarmonyPublicFields = 1u << 19,
-    kAllowHarmonyStaticFields = 1u << 20,
-    kAllowHarmonyDynamicImport = 1u << 21,
-    kAllowHarmonyImportMeta = 1u << 22,
-    kAllowHarmonyOptionalChaining = 1u << 23,
-    kHasStaticPrivateMethodsOrAccessors = 1u << 24,
-    kAllowHarmonyPrivateMethods = 1u << 25,
-    kIsOneshotIIFE = 1u << 26,
-    kCollectSourcePositions = 1u << 27,
-    kAllowHarmonyNullish = 1u << 28,
-    kAllowHarmonyTopLevelAwait = 1u << 29,
-    kREPLMode = 1u << 30,
-    kClassScopeHasPrivateBrand = 1u << 31,
-  };
+  void CheckFlagsForToplevelCompileFromScript(Tagged<Script> script);
 
   //------------- Inputs to parsing and scope analysis -----------------------
-  std::unique_ptr<Zone> zone_;
-  uint32_t flags_;
+  const UnoptimizedCompileFlags flags_;
+  UnoptimizedCompileState* state_;
+  ReusableUnoptimizedCompileState* reusable_state_;
+
   v8::Extension* extension_;
   DeclarationScope* script_scope_;
   uintptr_t stack_limit_;
-  uint64_t hash_seed_;
-  FunctionKind function_kind_;
-  FunctionSyntaxKind function_syntax_kind_;
-  int script_id_;
-  int start_position_;
-  int end_position_;
   int parameters_end_pos_;
-  int function_literal_id_;
   int max_function_literal_id_;
+
+  v8::CompileHintCallback compile_hint_callback_ = nullptr;
+  void* compile_hint_callback_data_ = nullptr;
 
   //----------- Inputs+Outputs of parsing and scope analysis -----------------
   std::unique_ptr<Utf16CharacterStream> character_stream_;
   std::unique_ptr<ConsumedPreparseData> consumed_preparse_data_;
-  std::unique_ptr<AstValueFactory> ast_value_factory_;
-  const class AstStringConstants* ast_string_constants_;
   const AstRawString* function_name_;
   RuntimeCallStats* runtime_call_stats_;
-  Logger* logger_;
   SourceRangeMap* source_range_map_;  // Used when block coverage is enabled.
-  std::unique_ptr<ParallelTasks> parallel_tasks_;
 
   //----------- Output of parsing and scope analysis ------------------------
   FunctionLiteral* literal_;
-  PendingCompilationErrorHandler pending_error_handler_;
-
-  void SetFlag(Flag f) { flags_ |= f; }
-  void SetFlag(Flag f, bool v) { flags_ = v ? flags_ | f : flags_ & ~f; }
-  bool GetFlag(Flag f) const { return (flags_ & f) != 0; }
+  bool allow_eval_cache_ : 1;
+#if V8_ENABLE_WEBASSEMBLY
+  bool contains_asm_module_ : 1;
+#endif  // V8_ENABLE_WEBASSEMBLY
+  LanguageMode language_mode_ : 1;
+  bool is_background_compilation_ : 1;
+  bool is_streaming_compilation_ : 1;
 };
 
 }  // namespace internal

@@ -93,8 +93,8 @@ TEST_F(NodeZeroIsolateTestFixture, IsolatePlatformDelegateTest) {
     std::unique_ptr<node::Environment, decltype(&node::FreeEnvironment)>
       environment{node::CreateEnvironment(isolate_data.get(),
                                           context,
-                                          0, nullptr,
-                                          0, nullptr),
+                                          {},
+                                          {}),
                   node::FreeEnvironment};
     CHECK(environment);
   }
@@ -103,4 +103,23 @@ TEST_F(NodeZeroIsolateTestFixture, IsolatePlatformDelegateTest) {
   delegate->Shutdown();
   platform->UnregisterIsolate(isolate);
   isolate->Dispose();
+}
+
+TEST_F(PlatformTest, TracingControllerNullptr) {
+  v8::TracingController* orig_controller = node::GetTracingController();
+  node::SetTracingController(nullptr);
+  EXPECT_EQ(node::GetTracingController(), nullptr);
+
+  v8::Isolate::Scope isolate_scope(isolate_);
+  const v8::HandleScope handle_scope(isolate_);
+  const Argv argv;
+  Env env {handle_scope, argv};
+
+  node::LoadEnvironment(*env, [&](const node::StartExecutionCallbackInfo& info)
+                                  -> v8::MaybeLocal<v8::Value> {
+    return v8::Null(isolate_);
+  });
+
+  node::SetTracingController(orig_controller);
+  EXPECT_EQ(node::GetTracingController(), orig_controller);
 }

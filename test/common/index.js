@@ -19,24 +19,29 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* eslint-disable node-core/require-common-first, node-core/required-modules */
 /* eslint-disable node-core/crypto-check */
 'use strict';
 const process = global.process;  // Some tests tamper with the process global.
 
 const assert = require('assert');
-const { exec, execSync, spawnSync } = require('child_process');
+const { exec, execSync, spawn, spawnSync } = require('child_process');
 const fs = require('fs');
-// Do not require 'os' until needed so that test-os-checked-fucnction can
+const net = require('net');
+// Do not require 'os' until needed so that test-os-checked-function can
 // monkey patch it. If 'os' is required here, that test will fail.
 const path = require('path');
-const util = require('util');
+const { inspect } = require('util');
 const { isMainThread } = require('worker_threads');
 
 const tmpdir = require('./tmpdir');
-const bits = ['arm64', 'mips', 'mipsel', 'ppc64', 's390x', 'x64']
+const bits = ['arm64', 'loong64', 'mips', 'mipsel', 'ppc64', 'riscv64', 's390x', 'x64']
   .includes(process.arch) ? 64 : 32;
 const hasIntl = !!process.config.variables.v8_enable_i18n_support;
+
+const {
+  atob,
+  btoa,
+} = require('buffer');
 
 // Some tests assume a umask of 0o022 so set that up front. Tests that need a
 // different umask will set it themselves.
@@ -51,6 +56,39 @@ const noop = () => {};
 const hasCrypto = Boolean(process.versions.openssl) &&
                   !process.env.NODE_SKIP_CRYPTO;
 
+const hasOpenSSL3 = hasCrypto &&
+    require('crypto').constants.OPENSSL_VERSION_NUMBER >= 0x30000000;
+
+const hasOpenSSL31 = hasCrypto &&
+    require('crypto').constants.OPENSSL_VERSION_NUMBER >= 0x30100000;
+
+const hasQuic = hasCrypto && !!process.config.variables.openssl_quic;
+
+function parseTestFlags(filename = process.argv[1]) {
+  // The copyright notice is relatively big and the flags could come afterwards.
+  const bytesToRead = 1500;
+  const buffer = Buffer.allocUnsafe(bytesToRead);
+  const fd = fs.openSync(filename, 'r');
+  const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead);
+  fs.closeSync(fd);
+  const source = buffer.toString('utf8', 0, bytesRead);
+
+  const flagStart = source.search(/\/\/ Flags:\s+--/) + 10;
+
+  if (flagStart === 9) {
+    return [];
+  }
+  let flagEnd = source.indexOf('\n', flagStart);
+  // Normalize different EOL.
+  if (source[flagEnd - 1] === '\r') {
+    flagEnd--;
+  }
+  return source
+    .substring(flagStart, flagEnd)
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
 // Check for flags. Skip this for workers (both, the `cluster` module and
 // `worker_threads`) and child processes.
 // If the binary was built without-ssl then the crypto flags are
@@ -59,62 +97,61 @@ if (process.argv.length === 2 &&
     !process.env.NODE_SKIP_FLAG_CHECK &&
     isMainThread &&
     hasCrypto &&
-    require.main &&
-    require('cluster').isMaster) {
-  // The copyright notice is relatively big and the flags could come afterwards.
-  const bytesToRead = 1500;
-  const buffer = Buffer.allocUnsafe(bytesToRead);
-  const fd = fs.openSync(require.main.filename, 'r');
-  const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead);
-  fs.closeSync(fd);
-  const source = buffer.toString('utf8', 0, bytesRead);
-
-  const flagStart = source.indexOf('// Flags: --') + 10;
-  if (flagStart !== 9) {
-    let flagEnd = source.indexOf('\n', flagStart);
-    // Normalize different EOL.
-    if (source[flagEnd - 1] === '\r') {
-      flagEnd--;
-    }
-    const flags = source
-      .substring(flagStart, flagEnd)
-      .replace(/_/g, '-')
-      .split(' ');
-    const args = process.execArgv.map((arg) => arg.replace(/_/g, '-'));
-    for (const flag of flags) {
-      if (!args.includes(flag) &&
-          // If the binary is build without `intl` the inspect option is
-          // invalid. The test itself should handle this case.
-          (process.features.inspector || !flag.startsWith('--inspect'))) {
-        console.log(
-          'NOTE: The test started as a child_process using these flags:',
-          util.inspect(flags),
-          'Use NODE_SKIP_FLAG_CHECK to run the test with the original flags.'
-        );
-        const args = [...flags, ...process.execArgv, ...process.argv.slice(1)];
-        const options = { encoding: 'utf8', stdio: 'inherit' };
-        const result = spawnSync(process.execPath, args, options);
-        if (result.signal) {
-          process.kill(0, result.signal);
-        } else {
-          process.exit(result.status);
-        }
+    require('cluster').isPrimary &&
+    fs.existsSync(process.argv[1])) {
+  const flags = parseTestFlags();
+  for (const flag of flags) {
+    if (!process.execArgv.includes(flag) &&
+        // If the binary is build without `intl` the inspect option is
+        // invalid. The test itself should handle this case.
+        (process.features.inspector || !flag.startsWith('--inspect'))) {
+      console.log(
+        'NOTE: The test started as a child_process using these flags:',
+        inspect(flags),
+        'Use NODE_SKIP_FLAG_CHECK to run the test with the original flags.',
+      );
+      const args = [...flags, ...process.execArgv, ...process.argv.slice(1)];
+      const options = { encoding: 'utf8', stdio: 'inherit' };
+      const result = spawnSync(process.execPath, args, options);
+      if (result.signal) {
+        process.kill(0, result.signal);
+      } else {
+        process.exit(result.status);
       }
     }
   }
 }
 
 const isWindows = process.platform === 'win32';
-const isAIX = process.platform === 'aix';
 const isSunOS = process.platform === 'sunos';
 const isFreeBSD = process.platform === 'freebsd';
 const isOpenBSD = process.platform === 'openbsd';
 const isLinux = process.platform === 'linux';
 const isOSX = process.platform === 'darwin';
+const isAsan = process.env.ASAN !== undefined;
+const isPi = (() => {
+  try {
+    // Normal Raspberry Pi detection is to find the `Raspberry Pi` string in
+    // the contents of `/sys/firmware/devicetree/base/model` but that doesn't
+    // work inside a container. Match the chipset model number instead.
+    const cpuinfo = fs.readFileSync('/proc/cpuinfo', { encoding: 'utf8' });
+    const ok = /^Hardware\s*:\s*(.*)$/im.exec(cpuinfo)?.[1] === 'BCM2835';
+    /^/.test('');  // Clear RegExp.$_, some tests expect it to be empty.
+    return ok;
+  } catch {
+    return false;
+  }
+})();
 
 const isDumbTerminal = process.env.TERM === 'dumb';
 
-const rootDir = isWindows ? 'c:\\' : '/';
+// When using high concurrency or in the CI we need much more time for each connection attempt
+const defaultAutoSelectFamilyAttemptTimeout = platformTimeout(2500);
+// Since this is also used by tools outside of the test suite,
+// make sure setDefaultAutoSelectFamilyAttemptTimeout
+if (typeof net.setDefaultAutoSelectFamilyAttemptTimeout === 'function') {
+  net.setDefaultAutoSelectFamilyAttemptTimeout(platformTimeout(defaultAutoSelectFamilyAttemptTimeout));
+}
 
 const buildType = process.config.target_defaults ?
   process.config.target_defaults.default_configuration :
@@ -131,7 +168,7 @@ if (process.env.NODE_TEST_WITH_ASYNC_HOOKS) {
   process.on('exit', () => {
     // Iterate through handles to make sure nothing crashes
     for (const k in initHandles)
-      util.inspect(initHandles[k]);
+      inspect(initHandles[k]);
   });
 
   const _queueDestroyAsyncId = async_wrap.queueDestroyAsyncId;
@@ -141,7 +178,7 @@ if (process.env.NODE_TEST_WITH_ASYNC_HOOKS) {
       process._rawDebug();
       throw new Error(`same id added to destroy list twice (${id})`);
     }
-    destroyListList[id] = util.inspect(new Error());
+    destroyListList[id] = inspect(new Error());
     _queueDestroyAsyncId(id);
   };
 
@@ -155,7 +192,7 @@ if (process.env.NODE_TEST_WITH_ASYNC_HOOKS) {
       }
       initHandles[id] = {
         resource,
-        stack: util.inspect(new Error()).substr(6)
+        stack: inspect(new Error()).substr(6),
       };
     },
     before() { },
@@ -166,7 +203,7 @@ if (process.env.NODE_TEST_WITH_ASYNC_HOOKS) {
         process._rawDebug();
         throw new Error(`destroy called for same id (${id})`);
       }
-      destroydIdsList[id] = util.inspect(new Error());
+      destroydIdsList[id] = inspect(new Error());
     },
   }).enable();
 }
@@ -196,11 +233,9 @@ const PIPE = (() => {
   return path.join(pipePrefix, pipeName);
 })();
 
-/*
- * Check that when running a test with
- * `$node --abort-on-uncaught-exception $file child`
- * the process aborts.
- */
+// Check that when running a test with
+// `$node --abort-on-uncaught-exception $file child`
+// the process aborts.
 function childShouldThrowAndAbort() {
   let testCmd = '';
   if (!isWindows) {
@@ -238,25 +273,18 @@ function platformTimeout(ms) {
   if (process.features.debug)
     ms = multipliers.two * ms;
 
-  if (isAIX)
+  if (exports.isAIX || exports.isIBMi)
     return multipliers.two * ms; // Default localhost speed is slower on AIX
 
-  if (process.arch !== 'arm')
-    return ms;
+  if (isPi)
+    return multipliers.two * ms;  // Raspberry Pi devices
 
-  const armv = process.config.variables.arm_version;
-
-  if (armv === '6')
-    return multipliers.seven * ms;  // ARMv6
-
-  if (armv === '7')
-    return multipliers.two * ms;  // ARMv7
-
-  return ms; // ARMv8+
+  return ms;
 }
 
 let knownGlobals = [
-  AbortController,
+  atob,
+  btoa,
   clearImmediate,
   clearInterval,
   clearTimeout,
@@ -267,12 +295,86 @@ let knownGlobals = [
   queueMicrotask,
 ];
 
+// TODO(@jasnell): This check can be temporary. AbortController is
+// not currently supported in either Node.js 12 or 10, making it
+// difficult to run tests comparatively on those versions. Once
+// all supported versions have AbortController as a global, this
+// check can be removed and AbortController can be added to the
+// knownGlobals list above.
+if (global.AbortController)
+  knownGlobals.push(global.AbortController);
+
 if (global.gc) {
   knownGlobals.push(global.gc);
 }
 
-function allowGlobals(...whitelist) {
-  knownGlobals = knownGlobals.concat(whitelist);
+if (global.navigator) {
+  knownGlobals.push(global.navigator);
+}
+
+if (global.Navigator) {
+  knownGlobals.push(global.Navigator);
+}
+
+if (global.Performance) {
+  knownGlobals.push(global.Performance);
+}
+if (global.performance) {
+  knownGlobals.push(global.performance);
+}
+if (global.PerformanceMark) {
+  knownGlobals.push(global.PerformanceMark);
+}
+if (global.PerformanceMeasure) {
+  knownGlobals.push(global.PerformanceMeasure);
+}
+
+// TODO(@ethan-arrowood): Similar to previous checks, this can be temporary
+// until v16.x is EOL. Once all supported versions have structuredClone we
+// can add this to the list above instead.
+if (global.structuredClone) {
+  knownGlobals.push(global.structuredClone);
+}
+
+if (global.fetch) {
+  knownGlobals.push(fetch);
+}
+if (hasCrypto && global.crypto) {
+  knownGlobals.push(global.crypto);
+  knownGlobals.push(global.Crypto);
+  knownGlobals.push(global.CryptoKey);
+  knownGlobals.push(global.SubtleCrypto);
+}
+if (global.CustomEvent) {
+  knownGlobals.push(global.CustomEvent);
+}
+if (global.ReadableStream) {
+  knownGlobals.push(
+    global.ReadableStream,
+    global.ReadableStreamDefaultReader,
+    global.ReadableStreamBYOBReader,
+    global.ReadableStreamBYOBRequest,
+    global.ReadableByteStreamController,
+    global.ReadableStreamDefaultController,
+    global.TransformStream,
+    global.TransformStreamDefaultController,
+    global.WritableStream,
+    global.WritableStreamDefaultWriter,
+    global.WritableStreamDefaultController,
+    global.ByteLengthQueuingStrategy,
+    global.CountQueuingStrategy,
+    global.TextEncoderStream,
+    global.TextDecoderStream,
+    global.CompressionStream,
+    global.DecompressionStream,
+  );
+}
+if (global.WebSocket) {
+  knownGlobals.push(WebSocket);
+}
+
+function allowGlobals(...allowlist) {
+  knownGlobals = knownGlobals.concat(allowlist);
 }
 
 if (process.env.NODE_TEST_KNOWN_GLOBALS !== '0') {
@@ -285,7 +387,9 @@ if (process.env.NODE_TEST_KNOWN_GLOBALS !== '0') {
     const leaked = [];
 
     for (const val in global) {
-      if (!knownGlobals.includes(global[val])) {
+      // globalThis.crypto is a getter that throws if Node.js was compiled
+      // without OpenSSL.
+      if (val !== 'crypto' && !knownGlobals.includes(global[val])) {
         leaked.push(val);
       }
     }
@@ -330,6 +434,14 @@ function mustCall(fn, exact) {
   return _mustCallInner(fn, exact, 'exact');
 }
 
+function mustSucceed(fn, exact) {
+  return mustCall(function(err, ...args) {
+    assert.ifError(err);
+    if (typeof fn === 'function')
+      return fn.apply(this, args);
+  }, exact);
+}
+
 function mustCallAtLeast(fn, minimum) {
   return _mustCallInner(fn, minimum, 'minimum');
 }
@@ -350,8 +462,8 @@ function _mustCallInner(fn, criteria = 1, field) {
   const context = {
     [field]: criteria,
     actual: 0,
-    stack: util.inspect(new Error()),
-    name: fn.name || '<anonymous>'
+    stack: inspect(new Error()),
+    name: fn.name || '<anonymous>',
   };
 
   // Add the exit listener only once to avoid listener leak warnings
@@ -359,10 +471,28 @@ function _mustCallInner(fn, criteria = 1, field) {
 
   mustCallChecks.push(context);
 
-  return function() {
+  const _return = function() { // eslint-disable-line func-style
     context.actual++;
     return fn.apply(this, arguments);
   };
+  // Function instances have own properties that may be relevant.
+  // Let's replicate those properties to the returned function.
+  // Refs: https://tc39.es/ecma262/#sec-function-instances
+  Object.defineProperties(_return, {
+    name: {
+      value: fn.name,
+      writable: false,
+      enumerable: false,
+      configurable: true,
+    },
+    length: {
+      value: fn.length,
+      writable: false,
+      enumerable: false,
+      configurable: true,
+    },
+  });
+  return _return;
 }
 
 function hasMultiLocalhost() {
@@ -376,7 +506,7 @@ function hasMultiLocalhost() {
 
 function skipIfEslintMissing() {
   if (!fs.existsSync(
-    path.join(__dirname, '..', '..', 'tools', 'node_modules', 'eslint')
+    path.join(__dirname, '..', '..', 'tools', 'node_modules', 'eslint'),
   )) {
     skip('missing ESLint');
   }
@@ -411,17 +541,66 @@ function getCallSite(top) {
   const err = new Error();
   Error.captureStackTrace(err, top);
   // With the V8 Error API, the stack is not formatted until it is accessed
-  err.stack;
+  err.stack; // eslint-disable-line no-unused-expressions
   Error.prepareStackTrace = originalStackFormatter;
   return err.stack;
 }
 
 function mustNotCall(msg) {
   const callSite = getCallSite(mustNotCall);
-  return function mustNotCall() {
+  return function mustNotCall(...args) {
+    const argsInfo = args.length > 0 ?
+      `\ncalled with arguments: ${args.map((arg) => inspect(arg)).join(', ')}` : '';
     assert.fail(
-      `${msg || 'function should not have been called'} at ${callSite}`);
+      `${msg || 'function should not have been called'} at ${callSite}` +
+      argsInfo);
   };
+}
+
+const _mustNotMutateObjectDeepProxies = new WeakMap();
+
+function mustNotMutateObjectDeep(original) {
+  // Return primitives and functions directly. Primitives are immutable, and
+  // proxied functions are impossible to compare against originals, e.g. with
+  // `assert.deepEqual()`.
+  if (original === null || typeof original !== 'object') {
+    return original;
+  }
+
+  const cachedProxy = _mustNotMutateObjectDeepProxies.get(original);
+  if (cachedProxy) {
+    return cachedProxy;
+  }
+
+  const _mustNotMutateObjectDeepHandler = {
+    __proto__: null,
+    defineProperty(target, property, descriptor) {
+      assert.fail(`Expected no side effects, got ${inspect(property)} ` +
+                  'defined');
+    },
+    deleteProperty(target, property) {
+      assert.fail(`Expected no side effects, got ${inspect(property)} ` +
+                  'deleted');
+    },
+    get(target, prop, receiver) {
+      return mustNotMutateObjectDeep(Reflect.get(target, prop, receiver));
+    },
+    preventExtensions(target) {
+      assert.fail('Expected no side effects, got extensions prevented on ' +
+                  inspect(target));
+    },
+    set(target, property, value, receiver) {
+      assert.fail(`Expected no side effects, got ${inspect(value)} ` +
+                  `assigned to ${inspect(property)}`);
+    },
+    setPrototypeOf(target, prototype) {
+      assert.fail(`Expected no side effects, got set prototype to ${prototype}`);
+    },
+  };
+
+  const proxy = new Proxy(original, _mustNotMutateObjectDeepHandler);
+  _mustNotMutateObjectDeepProxies.set(original, proxy);
+  return proxy;
 }
 
 function printSkipMessage(msg) {
@@ -449,12 +628,12 @@ function nodeProcessAborted(exitCode, signal) {
   const expectedSignals = ['SIGILL', 'SIGTRAP', 'SIGABRT'];
 
   // On Windows, 'aborts' are of 2 types, depending on the context:
-  // (i) Forced access violation, if --abort-on-uncaught-exception is on
-  // which corresponds to exit code 3221225477 (0xC0000005)
+  // (i) Exception breakpoint, if --abort-on-uncaught-exception is on
+  // which corresponds to exit code 2147483651 (0x80000003)
   // (ii) Otherwise, _exit(134) which is called in place of abort() due to
   // raising SIGABRT exiting with ambiguous exit code '3' by default
   if (isWindows)
-    expectedExitCodes = [0xC0000005, 134];
+    expectedExitCodes = [0x80000003, 134];
 
   // When using --abort-on-uncaught-exception, V8 will use
   // base::OS::Abort to terminate the process.
@@ -491,12 +670,16 @@ function _expectWarning(name, expected, code) {
     expected.forEach(([_, code]) => assert(code, expected));
   }
   return mustCall((warning) => {
-    const [ message, code ] = expected.shift();
+    const expectedProperties = expected.shift();
+    if (!expectedProperties) {
+      assert.fail(`Unexpected extra warning received: ${warning}`);
+    }
+    const [ message, code ] = expectedProperties;
     assert.strictEqual(warning.name, name);
     if (typeof message === 'string') {
       assert.strictEqual(warning.message, message);
     } else {
-      assert(message.test(warning.message));
+      assert.match(warning.message, message);
     }
     assert.strictEqual(warning.code, code);
   }, expected.length);
@@ -515,7 +698,7 @@ function expectWarning(nameOrMap, expected, code) {
       if (!catchWarning[warning.name]) {
         throw new TypeError(
           `"${warning.name}" was triggered without being expected.\n` +
-          util.inspect(warning)
+          inspect(warning),
         );
       }
       catchWarning[warning.name](warning);
@@ -536,12 +719,11 @@ function expectsError(validator, exact) {
     if (args.length !== 1) {
       // Do not use `assert.strictEqual()` to prevent `inspect` from
       // always being called.
-      assert.fail(`Expected one argument, got ${util.inspect(args)}`);
+      assert.fail(`Expected one argument, got ${inspect(args)}`);
     }
     const error = args.pop();
-    const descriptor = Object.getOwnPropertyDescriptor(error, 'message');
     // The error message should be non-enumerable
-    assert.strictEqual(descriptor.enumerable, false);
+    assert.strictEqual(Object.prototype.propertyIsEnumerable.call(error, 'message'), false);
 
     assert.throws(() => { throw error; }, validator);
     return true;
@@ -581,7 +763,9 @@ function getArrayBufferViews(buf) {
     Uint32Array,
     Float32Array,
     Float64Array,
-    DataView
+    BigInt64Array,
+    BigUint64Array,
+    DataView,
   ];
 
   for (const type of arrayBufferViews) {
@@ -595,13 +779,6 @@ function getArrayBufferViews(buf) {
 
 function getBufferSources(buf) {
   return [...getArrayBufferViews(buf), new Uint8Array(buf).buffer];
-}
-
-// Crash the process on unhandled rejections.
-const crashOnUnhandledRejection = (err) => { throw err; };
-process.on('unhandledRejection', crashOnUnhandledRejection);
-function disableCrashOnUnhandledRejection() {
-  process.removeListener('unhandledRejection', crashOnUnhandledRejection);
 }
 
 function getTTYfd() {
@@ -639,18 +816,19 @@ function invalidArgTypeHelper(input) {
   if (input == null) {
     return ` Received ${input}`;
   }
-  if (typeof input === 'function' && input.name) {
+  if (typeof input === 'function') {
     return ` Received function ${input.name}`;
   }
   if (typeof input === 'object') {
-    if (input.constructor && input.constructor.name) {
+    if (input.constructor?.name) {
       return ` Received an instance of ${input.constructor.name}`;
     }
-    return ` Received ${util.inspect(input, { depth: -1 })}`;
+    return ` Received ${inspect(input, { depth: -1 })}`;
   }
-  let inspected = util.inspect(input, { colors: false });
-  if (inspected.length > 25)
-    inspected = `${inspected.slice(0, 25)}...`;
+
+  let inspected = inspect(input, { colors: false });
+  if (inspected.length > 28) { inspected = `${inspected.slice(inspected, 0, 25)}...`; }
+
   return ` Received type ${typeof input} (${inspected})`;
 }
 
@@ -660,43 +838,159 @@ function skipIfDumbTerminal() {
   }
 }
 
+function gcUntil(name, condition) {
+  if (typeof name === 'function') {
+    condition = name;
+    name = undefined;
+  }
+  return new Promise((resolve, reject) => {
+    let count = 0;
+    function gcAndCheck() {
+      setImmediate(() => {
+        count++;
+        global.gc();
+        if (condition()) {
+          resolve();
+        } else if (count < 10) {
+          gcAndCheck();
+        } else {
+          reject(name === undefined ? undefined : 'Test ' + name + ' failed');
+        }
+      });
+    }
+    gcAndCheck();
+  });
+}
+
+function requireNoPackageJSONAbove(dir = __dirname) {
+  let possiblePackage = path.join(dir, '..', 'package.json');
+  let lastPackage = null;
+  while (possiblePackage !== lastPackage) {
+    if (fs.existsSync(possiblePackage)) {
+      assert.fail(
+        'This test shouldn\'t load properties from a package.json above ' +
+        `its file location. Found package.json at ${possiblePackage}.`);
+    }
+    lastPackage = possiblePackage;
+    possiblePackage = path.join(possiblePackage, '..', '..', 'package.json');
+  }
+}
+
+function spawnPromisified(...args) {
+  let stderr = '';
+  let stdout = '';
+
+  const child = spawn(...args);
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (data) => { stderr += data; });
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (data) => { stdout += data; });
+
+  return new Promise((resolve, reject) => {
+    child.on('close', (code, signal) => {
+      resolve({
+        code,
+        signal,
+        stderr,
+        stdout,
+      });
+    });
+    child.on('error', (code, signal) => {
+      reject({
+        code,
+        signal,
+        stderr,
+        stdout,
+      });
+    });
+  });
+}
+
+function getPrintedStackTrace(stderr) {
+  const lines = stderr.split('\n');
+
+  let state = 'initial';
+  const result = {
+    message: [],
+    nativeStack: [],
+    jsStack: [],
+  };
+  for (let i = 0; i < lines.length; ++i) {
+    const line = lines[i].trim();
+    if (line.length === 0) {
+      continue;  // Skip empty lines.
+    }
+
+    switch (state) {
+      case 'initial':
+        result.message.push(line);
+        if (line.includes('Native stack trace')) {
+          state = 'native-stack';
+        } else {
+          result.message.push(line);
+        }
+        break;
+      case 'native-stack':
+        if (line.includes('JavaScript stack trace')) {
+          state = 'js-stack';
+        } else {
+          result.nativeStack.push(line);
+        }
+        break;
+      case 'js-stack':
+        result.jsStack.push(line);
+        break;
+    }
+  }
+  return result;
+}
+
 const common = {
   allowGlobals,
   buildType,
   canCreateSymLink,
   childShouldThrowAndAbort,
   createZeroFilledFile,
-  disableCrashOnUnhandledRejection,
+  defaultAutoSelectFamilyAttemptTimeout,
   expectsError,
   expectWarning,
+  gcUntil,
   getArrayBufferViews,
   getBufferSources,
   getCallSite,
+  getPrintedStackTrace,
   getTTYfd,
   hasIntl,
   hasCrypto,
+  hasOpenSSL3,
+  hasOpenSSL31,
+  hasQuic,
   hasMultiLocalhost,
   invalidArgTypeHelper,
-  isAIX,
   isAlive,
+  isAsan,
   isDumbTerminal,
   isFreeBSD,
   isLinux,
   isMainThread,
   isOpenBSD,
   isOSX,
+  isPi,
   isSunOS,
   isWindows,
   localIPv6Hosts,
   mustCall,
   mustCallAtLeast,
   mustNotCall,
+  mustNotMutateObjectDeep,
+  mustSucceed,
   nodeProcessAborted,
   PIPE,
+  parseTestFlags,
   platformTimeout,
   printSkipMessage,
   pwdCommand,
-  rootDir,
+  requireNoPackageJSONAbove,
   runWithInvalidFD,
   skip,
   skipIf32Bits,
@@ -704,11 +998,7 @@ const common = {
   skipIfEslintMissing,
   skipIfInspectorDisabled,
   skipIfWorker,
-
-  get enoughTestCpu() {
-    const cpus = require('os').cpus();
-    return Array.isArray(cpus) && (cpus.length > 1 || cpus[0].speed > 999);
-  },
+  spawnPromisified,
 
   get enoughTestMem() {
     return require('os').totalmem() > 0x70000000; /* 1.75 Gb */
@@ -720,7 +1010,14 @@ const common = {
 
   get hasIPv6() {
     const iFaces = require('os').networkInterfaces();
-    const re = isWindows ? /Loopback Pseudo-Interface/ : /lo/;
+    let re;
+    if (isWindows) {
+      re = /Loopback Pseudo-Interface/;
+    } else if (this.isIBMi) {
+      re = /\*LOOPBACK/;
+    } else {
+      re = /lo/;
+    }
     return Object.keys(iFaces).some((name) => {
       return re.test(name) &&
              iFaces[name].some(({ family }) => family === 'IPv6');
@@ -740,7 +1037,12 @@ const common = {
   },
 
   // On IBMi, process.platform and os.platform() both return 'aix',
+  // when built with Python versions earlier than 3.9.
   // It is not enough to differentiate between IBMi and real AIX system.
+  get isAIX() {
+    return require('os').type() === 'AIX';
+  },
+
   get isIBMi() {
     return require('os').type() === 'OS400';
   },
@@ -771,8 +1073,6 @@ const common = {
     return localhostIPv4;
   },
 
-  get localhostIPv6() { return '::1'; },
-
   // opensslCli defined lazily to reduce overhead of spawnSync
   get opensslCli() {
     if (opensslCli !== null) return opensslCli;
@@ -800,8 +1100,14 @@ const common = {
       throw new Error('common.PORT cannot be used in a parallelized test');
     }
     return +process.env.NODE_COMMON_PORT || 12346;
-  }
+  },
 
+  /**
+   * Returns the EOL character used by this Git checkout.
+   */
+  get checkoutEOL() {
+    return fs.readFileSync(__filename).includes('\r\n') ? '\r\n' : '\n';
+  },
 };
 
 const validProperties = new Set(Object.keys(common));
@@ -810,5 +1116,5 @@ module.exports = new Proxy(common, {
     if (!validProperties.has(prop))
       throw new Error(`Using invalid common property: '${prop}'`);
     return obj[prop];
-  }
+  },
 });

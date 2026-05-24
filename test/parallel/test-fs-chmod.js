@@ -22,7 +22,6 @@
 'use strict';
 const common = require('../common');
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs');
 
 let mode_async;
@@ -74,15 +73,13 @@ if (common.isWindows) {
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
-const file1 = path.join(tmpdir.path, 'a.js');
-const file2 = path.join(tmpdir.path, 'a1.js');
+const file1 = tmpdir.resolve('a.js');
+const file2 = tmpdir.resolve('a1.js');
 
 // Create file1.
 fs.closeSync(fs.openSync(file1, 'w'));
 
-fs.chmod(file1, mode_async.toString(8), common.mustCall((err) => {
-  assert.ifError(err);
-
+fs.chmod(file1, mode_async.toString(8), common.mustSucceed(() => {
   if (common.isWindows) {
     assert.ok((fs.statSync(file1).mode & 0o777) & mode_async);
   } else {
@@ -97,12 +94,8 @@ fs.chmod(file1, mode_async.toString(8), common.mustCall((err) => {
   }
 }));
 
-fs.open(file2, 'w', common.mustCall((err, fd) => {
-  assert.ifError(err);
-
-  fs.fchmod(fd, mode_async.toString(8), common.mustCall((err) => {
-    assert.ifError(err);
-
+fs.open(file2, 'w', common.mustSucceed((fd) => {
+  fs.fchmod(fd, mode_async.toString(8), common.mustSucceed(() => {
     if (common.isWindows) {
       assert.ok((fs.fstatSync(fd).mode & 0o777) & mode_async);
     } else {
@@ -112,10 +105,7 @@ fs.open(file2, 'w', common.mustCall((err, fd) => {
     assert.throws(
       () => fs.fchmod(fd, {}),
       {
-        code: 'ERR_INVALID_ARG_VALUE',
-        name: 'TypeError',
-        message: 'The argument \'mode\' must be a 32-bit unsigned integer ' +
-                 'or an octal string. Received {}'
+        code: 'ERR_INVALID_ARG_TYPE',
       }
     );
 
@@ -132,13 +122,11 @@ fs.open(file2, 'w', common.mustCall((err, fd) => {
 
 // lchmod
 if (fs.lchmod) {
-  const link = path.join(tmpdir.path, 'symbolic-link');
+  const link = tmpdir.resolve('symbolic-link');
 
   fs.symlinkSync(file2, link);
 
-  fs.lchmod(link, mode_async, common.mustCall((err) => {
-    assert.ifError(err);
-
+  fs.lchmod(link, mode_async, common.mustSucceed(() => {
     assert.strictEqual(fs.lstatSync(link).mode & 0o777, mode_async);
 
     fs.lchmodSync(link, mode_sync);

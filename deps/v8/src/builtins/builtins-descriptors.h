@@ -5,57 +5,29 @@
 #ifndef V8_BUILTINS_BUILTINS_DESCRIPTORS_H_
 #define V8_BUILTINS_BUILTINS_DESCRIPTORS_H_
 
-#include "src/builtins/builtins.h"
+#include "src/builtins/builtins-definitions.h"
 #include "src/codegen/interface-descriptors.h"
-#include "src/compiler/code-assembler.h"
-#include "src/objects/shared-function-info.h"
+#include "src/common/globals.h"
 
 namespace v8 {
 namespace internal {
 
-#define REVERSE_0(a) a,
-#define REVERSE_1(a, b) b, a,
-#define REVERSE_2(a, b, c) c, b, a,
-#define REVERSE_3(a, b, c, d) d, c, b, a,
-#define REVERSE_4(a, b, c, d, e) e, d, c, b, a,
-#define REVERSE_5(a, b, c, d, e, f) f, e, d, c, b, a,
-#define REVERSE_6(a, b, c, d, e, f, g) g, f, e, d, c, b, a,
-#define REVERSE_7(a, b, c, d, e, f, g, h) h, g, f, e, d, c, b, a,
-#define REVERSE_8(a, b, c, d, e, f, g, h, i) i, h, g, f, e, d, c, b, a,
-#define REVERSE_kDontAdaptArgumentsSentinel(...)
-#define REVERSE(N, ...) REVERSE_##N(__VA_ARGS__)
-
 // Define interface descriptors for builtins with JS linkage.
-#ifdef V8_REVERSE_JSARGS
-#define DEFINE_TFJ_INTERFACE_DESCRIPTOR(Name, Argc, ...)                \
-  struct Builtin_##Name##_InterfaceDescriptor {                         \
-    enum ParameterIndices {                                             \
-      kJSTarget = compiler::CodeAssembler::kTargetParameterIndex,       \
-      REVERSE_##Argc(__VA_ARGS__) kJSNewTarget,                         \
-      kJSActualArgumentsCount,                                          \
-      kContext,                                                         \
-      kParameterCount,                                                  \
-    };                                                                  \
-    static_assert((Argc) == static_cast<uint16_t>(kParameterCount - 4), \
-                  "Inconsistent set of arguments");                     \
-    static_assert(kJSTarget == -1, "Unexpected kJSTarget index value"); \
+#define DEFINE_TFJ_INTERFACE_DESCRIPTOR(Name, Argc, ...)                 \
+  struct Builtin_##Name##_InterfaceDescriptor {                          \
+    enum ParameterIndices {                                              \
+      kJSTarget = kJSCallClosureParameterIndex,                          \
+      ##__VA_ARGS__,                                                     \
+      kJSNewTarget,                                                      \
+      kJSActualArgumentsCount,                                           \
+      kContext,                                                          \
+      kParameterCount,                                                   \
+    };                                                                   \
+    static_assert((Argc) == static_cast<uint16_t>(kParameterCount - 4 +  \
+                                                  kJSArgcReceiverSlots), \
+                  "Inconsistent set of arguments");                      \
+    static_assert(kJSTarget == -1, "Unexpected kJSTarget index value");  \
   };
-#else
-#define DEFINE_TFJ_INTERFACE_DESCRIPTOR(Name, Argc, ...)                \
-  struct Builtin_##Name##_InterfaceDescriptor {                         \
-    enum ParameterIndices {                                             \
-      kJSTarget = compiler::CodeAssembler::kTargetParameterIndex,       \
-      ##__VA_ARGS__,                                                    \
-      kJSNewTarget,                                                     \
-      kJSActualArgumentsCount,                                          \
-      kContext,                                                         \
-      kParameterCount,                                                  \
-    };                                                                  \
-    static_assert((Argc) == static_cast<uint16_t>(kParameterCount - 4), \
-                  "Inconsistent set of arguments");                     \
-    static_assert(kJSTarget == -1, "Unexpected kJSTarget index value"); \
-  };
-#endif
 
 // Define interface descriptors for builtins with StubCall linkage.
 #define DEFINE_TFC_INTERFACE_DESCRIPTOR(Name, InterfaceDescriptor) \

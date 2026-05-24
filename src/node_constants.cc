@@ -47,16 +47,30 @@
 #include <dlfcn.h>
 #endif
 
+#if defined(_WIN32)
+#include <io.h>  // _S_IREAD _S_IWRITE
+#ifndef S_IRUSR
+#define S_IRUSR _S_IREAD
+#endif  // S_IRUSR
+#ifndef S_IWUSR
+#define S_IWUSR _S_IWRITE
+#endif  // S_IWUSR
+#endif
+
 #include <cerrno>
 #include <csignal>
 #include <limits>
 
 namespace node {
 
+using v8::Context;
+using v8::Isolate;
 using v8::Local;
+using v8::Null;
 using v8::Object;
+using v8::Value;
 
-namespace {
+namespace constants {
 
 void DefineErrnoConstants(Local<Object> target) {
 #ifdef E2BIG
@@ -806,6 +820,10 @@ void DefineCryptoConstants(Local<Object> target) {
     NODE_DEFINE_CONSTANT(target, SSL_OP_ALL);
 #endif
 
+#ifdef SSL_OP_ALLOW_NO_DHE_KEX
+    NODE_DEFINE_CONSTANT(target, SSL_OP_ALLOW_NO_DHE_KEX);
+#endif
+
 #ifdef SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION
     NODE_DEFINE_CONSTANT(target, SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
 #endif
@@ -830,48 +848,24 @@ void DefineCryptoConstants(Local<Object> target) {
     NODE_DEFINE_CONSTANT(target, SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS);
 #endif
 
-#ifdef SSL_OP_EPHEMERAL_RSA
-    NODE_DEFINE_CONSTANT(target, SSL_OP_EPHEMERAL_RSA);
-#endif
-
 #ifdef SSL_OP_LEGACY_SERVER_CONNECT
     NODE_DEFINE_CONSTANT(target, SSL_OP_LEGACY_SERVER_CONNECT);
-#endif
-
-#ifdef SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER
-    NODE_DEFINE_CONSTANT(target, SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER);
-#endif
-
-#ifdef SSL_OP_MICROSOFT_SESS_ID_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_MICROSOFT_SESS_ID_BUG);
-#endif
-
-#ifdef SSL_OP_MSIE_SSLV2_RSA_PADDING
-    NODE_DEFINE_CONSTANT(target, SSL_OP_MSIE_SSLV2_RSA_PADDING);
-#endif
-
-#ifdef SSL_OP_NETSCAPE_CA_DN_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_NETSCAPE_CA_DN_BUG);
-#endif
-
-#ifdef SSL_OP_NETSCAPE_CHALLENGE_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_NETSCAPE_CHALLENGE_BUG);
-#endif
-
-#ifdef SSL_OP_NETSCAPE_DEMO_CIPHER_CHANGE_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_NETSCAPE_DEMO_CIPHER_CHANGE_BUG);
-#endif
-
-#ifdef SSL_OP_NETSCAPE_REUSE_CIPHER_CHANGE_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_NETSCAPE_REUSE_CIPHER_CHANGE_BUG);
 #endif
 
 #ifdef SSL_OP_NO_COMPRESSION
     NODE_DEFINE_CONSTANT(target, SSL_OP_NO_COMPRESSION);
 #endif
 
+#ifdef SSL_OP_NO_ENCRYPT_THEN_MAC
+    NODE_DEFINE_CONSTANT(target, SSL_OP_NO_ENCRYPT_THEN_MAC);
+#endif
+
 #ifdef SSL_OP_NO_QUERY_MTU
     NODE_DEFINE_CONSTANT(target, SSL_OP_NO_QUERY_MTU);
+#endif
+
+#ifdef SSL_OP_NO_RENEGOTIATION
+    NODE_DEFINE_CONSTANT(target, SSL_OP_NO_RENEGOTIATION);
 #endif
 
 #ifdef SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
@@ -902,36 +896,12 @@ void DefineCryptoConstants(Local<Object> target) {
     NODE_DEFINE_CONSTANT(target, SSL_OP_NO_TLSv1_2);
 #endif
 
-#ifdef SSL_OP_PKCS1_CHECK_1
-    NODE_DEFINE_CONSTANT(target, SSL_OP_PKCS1_CHECK_1);
+#ifdef SSL_OP_NO_TLSv1_3
+    NODE_DEFINE_CONSTANT(target, SSL_OP_NO_TLSv1_3);
 #endif
 
-#ifdef SSL_OP_PKCS1_CHECK_2
-    NODE_DEFINE_CONSTANT(target, SSL_OP_PKCS1_CHECK_2);
-#endif
-
-#ifdef SSL_OP_SINGLE_DH_USE
-    NODE_DEFINE_CONSTANT(target, SSL_OP_SINGLE_DH_USE);
-#endif
-
-#ifdef SSL_OP_SINGLE_ECDH_USE
-    NODE_DEFINE_CONSTANT(target, SSL_OP_SINGLE_ECDH_USE);
-#endif
-
-#ifdef SSL_OP_SSLEAY_080_CLIENT_DH_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_SSLEAY_080_CLIENT_DH_BUG);
-#endif
-
-#ifdef SSL_OP_SSLREF2_REUSE_CERT_TYPE_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_SSLREF2_REUSE_CERT_TYPE_BUG);
-#endif
-
-#ifdef SSL_OP_TLS_BLOCK_PADDING_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_TLS_BLOCK_PADDING_BUG);
-#endif
-
-#ifdef SSL_OP_TLS_D5_BUG
-    NODE_DEFINE_CONSTANT(target, SSL_OP_TLS_D5_BUG);
+#ifdef SSL_OP_PRIORITIZE_CHACHA
+    NODE_DEFINE_CONSTANT(target, SSL_OP_PRIORITIZE_CHACHA);
 #endif
 
 #ifdef SSL_OP_TLS_ROLLBACK_BUG
@@ -1000,11 +970,6 @@ void DefineCryptoConstants(Local<Object> target) {
 
 #ifdef DH_NOT_SUITABLE_GENERATOR
     NODE_DEFINE_CONSTANT(target, DH_NOT_SUITABLE_GENERATOR);
-#endif
-
-#ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
-#define ALPN_ENABLED 1
-    NODE_DEFINE_CONSTANT(target, ALPN_ENABLED);
 #endif
 
 #ifdef RSA_PKCS1_PADDING
@@ -1092,6 +1057,10 @@ void DefineSystemConstants(Local<Object> target) {
   NODE_DEFINE_CONSTANT(target, UV_DIRENT_SOCKET);
   NODE_DEFINE_CONSTANT(target, UV_DIRENT_CHAR);
   NODE_DEFINE_CONSTANT(target, UV_DIRENT_BLOCK);
+
+  // Define module specific constants
+  NODE_DEFINE_CONSTANT(target, EXTENSIONLESS_FORMAT_JAVASCRIPT);
+  NODE_DEFINE_CONSTANT(target, EXTENSIONLESS_FORMAT_WASM);
 
   NODE_DEFINE_CONSTANT(target, S_IFMT);
   NODE_DEFINE_CONSTANT(target, S_IFREG);
@@ -1309,10 +1278,14 @@ void DefineTraceConstants(Local<Object> target) {
   NODE_DEFINE_CONSTANT(target, TRACE_EVENT_PHASE_LINK_IDS);
 }
 
-}  // anonymous namespace
+void CreatePerContextProperties(Local<Object> target,
+                                Local<Value> unused,
+                                Local<Context> context,
+                                void* priv) {
+  Isolate* isolate = context->GetIsolate();
+  Environment* env = Environment::GetCurrent(context);
 
-void DefineConstants(v8::Isolate* isolate, Local<Object> target) {
-  Environment* env = Environment::GetCurrent(isolate);
+  CHECK(target->SetPrototype(env->context(), Null(env->isolate())).FromJust());
 
   Local<Object> os_constants = Object::New(isolate);
   CHECK(os_constants->SetPrototype(env->context(),
@@ -1392,4 +1365,8 @@ void DefineConstants(v8::Isolate* isolate, Local<Object> target) {
               trace_constants).Check();
 }
 
+}  // namespace constants
 }  // namespace node
+
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(constants,
+                                    node::constants::CreatePerContextProperties)

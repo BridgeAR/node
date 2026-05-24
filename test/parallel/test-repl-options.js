@@ -29,13 +29,13 @@ const repl = require('repl');
 const cp = require('child_process');
 
 assert.strictEqual(repl.repl, undefined);
-repl._builtinLibs;
+repl._builtinLibs; // eslint-disable-line no-unused-expressions
 
 common.expectWarning({
   DeprecationWarning: {
     DEP0142:
       'repl._builtinLibs is deprecated. Check module.builtinModules instead',
-    DEP0141: 'repl.inputStream and repl.outputStream is deprecated. ' +
+    DEP0141: 'repl.inputStream and repl.outputStream are deprecated. ' +
              'Use repl.input and repl.output instead',
   }
 });
@@ -104,7 +104,7 @@ assert.throws(r3, {
 // 4, Verify that defaults are used when no arguments are provided
 const r4 = repl.start();
 
-assert.strictEqual(r4._prompt, '> ');
+assert.strictEqual(r4.getPrompt(), '> ');
 assert.strictEqual(r4.input, process.stdin);
 assert.strictEqual(r4.output, process.stdout);
 assert.strictEqual(r4.terminal, !!r4.output.isTTY);

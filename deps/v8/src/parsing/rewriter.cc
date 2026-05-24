@@ -6,10 +6,17 @@
 
 #include "src/ast/ast.h"
 #include "src/ast/scopes.h"
+#include "src/logging/runtime-call-stats-scope.h"
 #include "src/objects/objects-inl.h"
 #include "src/parsing/parse-info.h"
 #include "src/parsing/parser.h"
 #include "src/zone/zone-list-inl.h"
+
+// Use this macro when `replacement_` or other data produced by Visit() is used
+// in a non-trivial way (needs to be valid) after calling Visit().
+#define VISIT_AND_RETURN_IF_STACK_OVERFLOW(param) \
+  Visit(param);                                   \
+  if (CheckStackOverflow()) return;
 
 namespace v8 {
 namespace internal {
@@ -17,12 +24,12 @@ namespace internal {
 class Processor final : public AstVisitor<Processor> {
  public:
   Processor(uintptr_t stack_limit, DeclarationScope* closure_scope,
-            Variable* result, AstValueFactory* ast_value_factory)
+            Variable* result, AstValueFactory* ast_value_factory, Zone* zone)
       : result_(result),
         replacement_(nullptr),
-        zone_(ast_value_factory->zone()),
+        zone_(zone),
         closure_scope_(closure_scope),
-        factory_(ast_value_factory, ast_value_factory->zone()),
+        factory_(ast_value_factory, zone),
         result_assigned_(false),
         is_set_(false),
         breakable_(false) {
@@ -31,10 +38,10 @@ class Processor final : public AstVisitor<Processor> {
   }
 
   Processor(Parser* parser, DeclarationScope* closure_scope, Variable* result,
-            AstValueFactory* ast_value_factory)
+            AstValueFactory* ast_value_factory, Zone* zone)
       : result_(result),
         replacement_(nullptr),
-        zone_(ast_value_factory->zone()),
+        zone_(zone),
         closure_scope_(closure_scope),
         factory_(ast_value_factory, zone_),
         result_assigned_(false),
@@ -69,7 +76,7 @@ class Processor final : public AstVisitor<Processor> {
   // [replacement_].  In many cases this will just be the original node.
   Statement* replacement_;
 
-  class BreakableScope final {
+  class V8_NODISCARD BreakableScope final {
    public:
     explicit BreakableScope(Processor* processor, bool breakable = true)
         : processor_(processor), previous_(processor->breakable_) {
@@ -225,12 +232,12 @@ void Processor::VisitTryCatchStatement(TryCatchStatement* node) {
   // Rewrite both try and catch block.
   bool set_after = is_set_;
 
-  Visit(node->try_block());
+  VISIT_AND_RETURN_IF_STACK_OVERFLOW(node->try_block());
   node->set_try_block(static_cast<Block*>(replacement_));
   bool set_in_try = is_set_;
 
   is_set_ = set_after;
-  Visit(node->catch_block());
+  VISIT_AND_RETURN_IF_STACK_OVERFLOW(node->catch_block());
   node->set_catch_block(static_cast<Block*>(replacement_));
 
   replacement_ = is_set_ && set_in_try ? node : AssignUndefinedBefore(node);
@@ -244,30 +251,47 @@ void Processor::VisitTryFinallyStatement(TryFinallyStatement* node) {
   if (breakable_) {
     // Only set result before a 'break' or 'continue'.
     is_set_ = true;
-    Visit(node->finally_block());
+    VISIT_AND_RETURN_IF_STACK_OVERFLOW(node->finally_block());
     node->set_finally_block(replacement_->AsBlock());
-    // Save .result value at the beginning of the finally block and restore it
-    // at the end again: ".backup = .result; ...; .result = .backup"
-    // This is necessary because the finally block does not normally contribute
-    // to the completion value.
     CHECK_NOT_NULL(closure_scope());
-    Variable* backup = closure_scope()->NewTemporary(
-        factory()->ast_value_factory()->dot_result_string());
-    Expression* backup_proxy = factory()->NewVariableProxy(backup);
-    Expression* result_proxy = factory()->NewVariableProxy(result_);
-    Expression* save = factory()->NewAssignment(
-        Token::ASSIGN, backup_proxy, result_proxy, kNoSourcePosition);
-    Expression* restore = factory()->NewAssignment(
-        Token::ASSIGN, result_proxy, backup_proxy, kNoSourcePosition);
-    node->finally_block()->statements()->InsertAt(
-        0, factory()->NewExpressionStatement(save, kNoSourcePosition), zone());
-    node->finally_block()->statements()->Add(
-        factory()->NewExpressionStatement(restore, kNoSourcePosition), zone());
+    if (is_set_) {
+      // Save .result value at the beginning of the finally block and restore it
+      // at the end again: ".backup = .result; ...; .result = .backup" This is
+      // necessary because the finally block does not normally contribute to the
+      // completion value.
+      Variable* backup = closure_scope()->NewTemporary(
+          factory()->ast_value_factory()->dot_result_string());
+      Expression* backup_proxy = factory()->NewVariableProxy(backup);
+      Expression* result_proxy = factory()->NewVariableProxy(result_);
+      Expression* save = factory()->NewAssignment(
+          Token::ASSIGN, backup_proxy, result_proxy, kNoSourcePosition);
+      Expression* restore = factory()->NewAssignment(
+          Token::ASSIGN, result_proxy, backup_proxy, kNoSourcePosition);
+      node->finally_block()->statements()->InsertAt(
+          0, factory()->NewExpressionStatement(save, kNoSourcePosition),
+          zone());
+      node->finally_block()->statements()->Add(
+          factory()->NewExpressionStatement(restore, kNoSourcePosition),
+          zone());
+    } else {
+      // If is_set_ is false, it means the finally block has a 'break' or a
+      // 'continue' and was not preceded by a statement that assigned to
+      // .result. Try-finally statements return the abrupt completions from the
+      // finally block, meaning this case should get an undefined.
+      //
+      // Since the finally block will definitely result in an abrupt completion,
+      // there's no need to save and restore the .result.
+      Expression* undef = factory()->NewUndefinedLiteral(kNoSourcePosition);
+      Expression* assignment = SetResult(undef);
+      node->finally_block()->statements()->InsertAt(
+          0, factory()->NewExpressionStatement(assignment, kNoSourcePosition),
+          zone());
+    }
     // We can't tell whether the finally-block is guaranteed to set .result, so
     // reset is_set_ before visiting the try-block.
     is_set_ = false;
   }
-  Visit(node->try_block());
+  VISIT_AND_RETURN_IF_STACK_OVERFLOW(node->try_block());
   node->set_try_block(replacement_->AsBlock());
 
   replacement_ = is_set_ ? node : AssignUndefinedBefore(node);
@@ -343,6 +367,11 @@ void Processor::VisitInitializeClassMembersStatement(
   replacement_ = node;
 }
 
+void Processor::VisitInitializeClassStaticElementsStatement(
+    InitializeClassStaticElementsStatement* node) {
+  replacement_ = node;
+}
+
 // Expressions are never visited.
 #define DEF_VISIT(type)                                         \
   void Processor::Visit##type(type* expr) { UNREACHABLE(); }
@@ -360,10 +389,9 @@ DECLARATION_NODE_LIST(DEF_VISIT)
 // Assumes code has been parsed.  Mutates the AST, so the AST should not
 // continue to be used in the case of failure.
 bool Rewriter::Rewrite(ParseInfo* info) {
-  RuntimeCallTimerScope runtimeTimer(
-      info->runtime_call_stats(),
-      RuntimeCallCounterId::kCompileRewriteReturnResult,
-      RuntimeCallStats::kThreadSpecific);
+  RCS_SCOPE(info->runtime_call_stats(),
+            RuntimeCallCounterId::kCompileRewriteReturnResult,
+            RuntimeCallStats::kThreadSpecific);
 
   FunctionLiteral* function = info->literal();
   DCHECK_NOT_NULL(function);
@@ -383,7 +411,7 @@ bool Rewriter::Rewrite(ParseInfo* info) {
 
 base::Optional<VariableProxy*> Rewriter::RewriteBody(
     ParseInfo* info, Scope* scope, ZonePtrList<Statement>* body) {
-  DisallowHeapAllocation no_allocation;
+  DisallowGarbageCollection no_gc;
   DisallowHandleAllocation no_handles;
   DisallowHandleDereference no_deref;
 
@@ -392,7 +420,7 @@ base::Optional<VariableProxy*> Rewriter::RewriteBody(
     Variable* result = scope->AsDeclarationScope()->NewTemporary(
         info->ast_value_factory()->dot_result_string());
     Processor processor(info->stack_limit(), scope->AsDeclarationScope(),
-                        result, info->ast_value_factory());
+                        result, info->ast_value_factory(), info->zone());
     processor.Process(body);
 
     DCHECK_IMPLIES(scope->is_module_scope(), processor.result_assigned());
@@ -400,7 +428,7 @@ base::Optional<VariableProxy*> Rewriter::RewriteBody(
       int pos = kNoSourcePosition;
       VariableProxy* result_value =
           processor.factory()->NewVariableProxy(result, pos);
-      if (!info->is_repl_mode()) {
+      if (!info->flags().is_repl_mode()) {
         Statement* result_statement =
             processor.factory()->NewReturnStatement(result_value, pos);
         body->Add(result_statement, info->zone());
@@ -408,10 +436,15 @@ base::Optional<VariableProxy*> Rewriter::RewriteBody(
       return result_value;
     }
 
-    if (processor.HasStackOverflow()) return base::nullopt;
+    if (processor.HasStackOverflow()) {
+      info->pending_error_handler()->set_stack_overflow();
+      return base::nullopt;
+    }
   }
   return nullptr;
 }
+
+#undef VISIT_AND_RETURN_IF_STACK_OVERFLOW
 
 }  // namespace internal
 }  // namespace v8

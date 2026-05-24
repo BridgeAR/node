@@ -7,11 +7,11 @@
 #include "src/execution/frames-inl.h"
 #include "src/objects/property-descriptor.h"
 #include "src/utils/utils.h"
+#include "src/wasm/wasm-debug.h"
 #include "src/wasm/wasm-objects-inl.h"
-
 #include "test/cctest/cctest.h"
-#include "test/cctest/compiler/value-helper.h"
 #include "test/cctest/wasm/wasm-run-utils.h"
+#include "test/common/value-helper.h"
 #include "test/common/wasm/test-signatures.h"
 #include "test/common/wasm/wasm-macro-gen.h"
 
@@ -75,8 +75,8 @@ class BreakHandler : public debug::DebugDelegate {
  public:
   enum Action {
     Continue = StepAction::LastStepAction + 1,
-    StepNext = StepAction::StepNext,
-    StepIn = StepAction::StepIn,
+    StepOver = StepAction::StepOver,
+    StepInto = StepAction::StepInto,
     StepOut = StepAction::StepOut
   };
   struct BreakPoint {
@@ -110,22 +110,23 @@ class BreakHandler : public debug::DebugDelegate {
   std::vector<BreakPoint> expected_breaks_;
 
   void BreakProgramRequested(v8::Local<v8::Context> paused_context,
-                             const std::vector<int>&) override {
+                             const std::vector<int>&,
+                             v8::debug::BreakReasons break_reasons) override {
     printf("Break #%d\n", count_);
     CHECK_GT(expected_breaks_.size(), count_);
 
     // Check the current position.
-    StackTraceFrameIterator frame_it(isolate_);
-    auto summ = FrameSummary::GetTop(frame_it.frame()).AsWasmInterpreted();
-    CHECK_EQ(expected_breaks_[count_].position, summ.byte_offset());
+    DebuggableStackFrameIterator frame_it(isolate_);
+    auto summ = FrameSummary::GetTop(frame_it.frame()).AsWasm();
+    CHECK_EQ(expected_breaks_[count_].position, summ.code_offset());
 
     expected_breaks_[count_].pre_action();
     Action next_action = expected_breaks_[count_].action;
     switch (next_action) {
       case Continue:
         break;
-      case StepNext:
-      case StepIn:
+      case StepOver:
+      case StepInto:
       case StepOut:
         isolate_->debug()->PrepareStep(static_cast<StepAction>(next_action));
         break;
@@ -139,27 +140,19 @@ class BreakHandler : public debug::DebugDelegate {
 Handle<BreakPoint> SetBreakpoint(WasmRunnerBase* runner, int function_index,
                                  int byte_offset,
                                  int expected_set_byte_offset = -1) {
-  runner->TierDown();
+  runner->SwitchToDebug();
   int func_offset =
       runner->builder().GetFunctionAt(function_index)->code.offset();
   int code_offset = func_offset + byte_offset;
   if (expected_set_byte_offset == -1) expected_set_byte_offset = byte_offset;
   Handle<WasmInstanceObject> instance = runner->builder().instance_object();
-  Handle<Script> script(instance->module_object().script(),
+  Handle<Script> script(instance->module_object()->script(),
                         runner->main_isolate());
   static int break_index = 0;
   Handle<BreakPoint> break_point =
       runner->main_isolate()->factory()->NewBreakPoint(
           break_index++, runner->main_isolate()->factory()->empty_string());
   CHECK(WasmScript::SetBreakPoint(script, &code_offset, break_point));
-  int set_byte_offset = code_offset - func_offset;
-  CHECK_EQ(expected_set_byte_offset, set_byte_offset);
-  // Also set breakpoint on the debug info of the instance directly, since the
-  // instance chain is not setup properly in tests.
-  Handle<WasmDebugInfo> debug_info =
-      WasmInstanceObject::GetOrCreateDebugInfo(instance);
-  WasmDebugInfo::SetBreakpoint(debug_info, function_index, set_byte_offset);
-
   return break_point;
 }
 
@@ -169,14 +162,9 @@ void ClearBreakpoint(WasmRunnerBase* runner, int function_index,
       runner->builder().GetFunctionAt(function_index)->code.offset();
   int code_offset = func_offset + byte_offset;
   Handle<WasmInstanceObject> instance = runner->builder().instance_object();
-  Handle<Script> script(instance->module_object().script(),
+  Handle<Script> script(instance->module_object()->script(),
                         runner->main_isolate());
   CHECK(WasmScript::ClearBreakPoint(script, code_offset, break_point));
-  // Also clear breakpoint on the debug info of the instance directly, since the
-  // instance chain is not setup properly in tests.
-  Handle<WasmDebugInfo> debug_info =
-      WasmInstanceObject::GetOrCreateDebugInfo(instance);
-  WasmDebugInfo::ClearBreakpoint(debug_info, function_index, byte_offset);
 }
 
 // Wrapper with operator<<.
@@ -192,16 +180,16 @@ struct WasmValWrapper {
 #ifdef DEBUG
 std::ostream& operator<<(std::ostream& out, const WasmValWrapper& wrapper) {
   switch (wrapper.val.type().kind()) {
-    case ValueType::kI32:
+    case kI32:
       out << "i32: " << wrapper.val.to<int32_t>();
       break;
-    case ValueType::kI64:
+    case kI64:
       out << "i64: " << wrapper.val.to<int64_t>();
       break;
-    case ValueType::kF32:
+    case kF32:
       out << "f32: " << wrapper.val.to<float>();
       break;
-    case ValueType::kF64:
+    case kF64:
       out << "f64: " << wrapper.val.to<double>();
       break;
     default:
@@ -234,7 +222,8 @@ class CollectValuesBreakHandler : public debug::DebugDelegate {
   std::vector<BreakpointValues> expected_values_;
 
   void BreakProgramRequested(v8::Local<v8::Context> paused_context,
-                             const std::vector<int>&) override {
+                             const std::vector<int>&,
+                             v8::debug::BreakReasons break_reasons) override {
     printf("Break #%d\n", count_);
     CHECK_GT(expected_values_.size(), count_);
     auto& expected = expected_values_[count_];
@@ -242,25 +231,27 @@ class CollectValuesBreakHandler : public debug::DebugDelegate {
 
     HandleScope handles(isolate_);
 
-    StackTraceFrameIterator frame_it(isolate_);
-    auto summ = FrameSummary::GetTop(frame_it.frame()).AsWasmInterpreted();
-    Handle<WasmInstanceObject> instance = summ.wasm_instance();
+    DebuggableStackFrameIterator frame_it(isolate_);
+    WasmFrame* frame = WasmFrame::cast(frame_it.frame());
+    DebugInfo* debug_info = frame->native_module()->GetDebugInfo();
 
-    auto frame =
-        instance->debug_info().GetInterpretedFrame(frame_it.frame()->fp(), 0);
-    CHECK_EQ(expected.locals.size(), frame->GetLocalCount());
-    for (int i = 0; i < frame->GetLocalCount(); ++i) {
-      CHECK_EQ(WasmValWrapper{expected.locals[i]},
-               WasmValWrapper{frame->GetLocalValue(i)});
+    int num_locals = debug_info->GetNumLocals(frame->pc());
+    CHECK_EQ(expected.locals.size(), num_locals);
+    for (int i = 0; i < num_locals; ++i) {
+      WasmValue local_value = debug_info->GetLocalValue(
+          i, frame->pc(), frame->fp(), frame->callee_fp(), isolate_);
+      CHECK_EQ(WasmValWrapper{expected.locals[i]}, WasmValWrapper{local_value});
     }
 
-    CHECK_EQ(expected.stack.size(), frame->GetStackHeight());
-    for (int i = 0; i < frame->GetStackHeight(); ++i) {
-      CHECK_EQ(WasmValWrapper{expected.stack[i]},
-               WasmValWrapper{frame->GetStackValue(i)});
+    int stack_depth = debug_info->GetStackDepth(frame->pc());
+    CHECK_EQ(expected.stack.size(), stack_depth);
+    for (int i = 0; i < stack_depth; ++i) {
+      WasmValue stack_value = debug_info->GetStackValue(
+          i, frame->pc(), frame->fp(), frame->callee_fp(), isolate_);
+      CHECK_EQ(WasmValWrapper{expected.stack[i]}, WasmValWrapper{stack_value});
     }
 
-    isolate_->debug()->PrepareStep(StepAction::StepIn);
+    isolate_->debug()->PrepareStep(StepAction::StepInto);
   }
 };
 
@@ -284,7 +275,7 @@ std::vector<WasmValue> wasmVec(Args... args) {
 int GetIntReturnValue(MaybeHandle<Object> retval) {
   CHECK(!retval.is_null());
   int result;
-  CHECK(retval.ToHandleChecked()->ToInt32(&result));
+  CHECK(Object::ToInt32(*retval.ToHandleChecked(), &result));
   return result;
 }
 
@@ -293,10 +284,10 @@ int GetIntReturnValue(MaybeHandle<Object> retval) {
 WASM_COMPILED_EXEC_TEST(WasmCollectPossibleBreakpoints) {
   WasmRunner<int> runner(execution_tier);
 
-  BUILD(runner, WASM_NOP, WASM_I32_ADD(WASM_ZERO, WASM_ONE));
+  runner.Build({WASM_NOP, WASM_I32_ADD(WASM_ZERO, WASM_ONE)});
 
-  WasmInstanceObject instance = *runner.builder().instance_object();
-  NativeModule* native_module = instance.module_object().native_module();
+  Tagged<WasmInstanceObject> instance = *runner.builder().instance_object();
+  NativeModule* native_module = instance->module_object()->native_module();
 
   std::vector<debug::Location> locations;
   // Check all locations for function 0.
@@ -321,7 +312,7 @@ WASM_COMPILED_EXEC_TEST(WasmSimpleBreak) {
   WasmRunner<int> runner(execution_tier);
   Isolate* isolate = runner.main_isolate();
 
-  BUILD(runner, WASM_NOP, WASM_I32_ADD(WASM_I32V_1(11), WASM_I32V_1(3)));
+  runner.Build({WASM_NOP, WASM_I32_ADD(WASM_I32V_1(11), WASM_I32V_1(3))});
 
   Handle<JSFunction> main_fun_wrapper =
       runner.builder().WrapCode(runner.function_index());
@@ -329,7 +320,7 @@ WASM_COMPILED_EXEC_TEST(WasmSimpleBreak) {
 
   BreakHandler count_breaks(isolate, {{4, BreakHandler::Continue}});
 
-  Handle<Object> global(isolate->context().global_object(), isolate);
+  Handle<Object> global(isolate->context()->global_object(), isolate);
   MaybeHandle<Object> retval =
       Execution::Call(isolate, main_fun_wrapper, global, 0, nullptr);
   CHECK_EQ(14, GetIntReturnValue(retval));
@@ -339,7 +330,7 @@ WASM_COMPILED_EXEC_TEST(WasmNonBreakablePosition) {
   WasmRunner<int> runner(execution_tier);
   Isolate* isolate = runner.main_isolate();
 
-  BUILD(runner, WASM_RETURN1(WASM_I32V_2(1024)));
+  runner.Build({WASM_RETURN(WASM_I32V_2(1024))});
 
   Handle<JSFunction> main_fun_wrapper =
       runner.builder().WrapCode(runner.function_index());
@@ -347,7 +338,7 @@ WASM_COMPILED_EXEC_TEST(WasmNonBreakablePosition) {
 
   BreakHandler count_breaks(isolate, {{4, BreakHandler::Continue}});
 
-  Handle<Object> global(isolate->context().global_object(), isolate);
+  Handle<Object> global(isolate->context()->global_object(), isolate);
   MaybeHandle<Object> retval =
       Execution::Call(isolate, main_fun_wrapper, global, 0, nullptr);
   CHECK_EQ(1024, GetIntReturnValue(retval));
@@ -355,7 +346,7 @@ WASM_COMPILED_EXEC_TEST(WasmNonBreakablePosition) {
 
 WASM_COMPILED_EXEC_TEST(WasmSimpleStepping) {
   WasmRunner<int> runner(execution_tier);
-  BUILD(runner, WASM_I32_ADD(WASM_I32V_1(11), WASM_I32V_1(3)));
+  runner.Build({WASM_I32_ADD(WASM_I32V_1(11), WASM_I32V_1(3))});
 
   Isolate* isolate = runner.main_isolate();
   Handle<JSFunction> main_fun_wrapper =
@@ -366,12 +357,12 @@ WASM_COMPILED_EXEC_TEST(WasmSimpleStepping) {
 
   BreakHandler count_breaks(isolate,
                             {
-                                {1, BreakHandler::StepNext},  // I32Const
-                                {3, BreakHandler::StepNext},  // I32Const
+                                {1, BreakHandler::StepOver},  // I32Const
+                                {3, BreakHandler::StepOver},  // I32Const
                                 {5, BreakHandler::Continue}   // I32Add
                             });
 
-  Handle<Object> global(isolate->context().global_object(), isolate);
+  Handle<Object> global(isolate->context()->global_object(), isolate);
   MaybeHandle<Object> retval =
       Execution::Call(isolate, main_fun_wrapper, global, 0, nullptr);
   CHECK_EQ(14, GetIntReturnValue(retval));
@@ -379,6 +370,7 @@ WASM_COMPILED_EXEC_TEST(WasmSimpleStepping) {
 
 WASM_COMPILED_EXEC_TEST(WasmStepInAndOut) {
   WasmRunner<int, int> runner(execution_tier);
+  runner.SwitchToDebug();
   WasmFunctionCompiler& f2 = runner.NewFunction<void>();
   f2.AllocateLocal(kWasmI32);
 
@@ -387,15 +379,14 @@ WASM_COMPILED_EXEC_TEST(WasmStepInAndOut) {
   // functions in the code section matches the function indexes.
 
   // return arg0
-  BUILD(runner, WASM_RETURN1(WASM_GET_LOCAL(0)));
+  runner.Build({WASM_RETURN(WASM_LOCAL_GET(0))});
   // for (int i = 0; i < 10; ++i) { f2(i); }
-  BUILD(f2, WASM_LOOP(
-                WASM_BR_IF(0, WASM_BINOP(kExprI32GeU, WASM_GET_LOCAL(0),
-                                         WASM_I32V_1(10))),
-                WASM_SET_LOCAL(
-                    0, WASM_BINOP(kExprI32Sub, WASM_GET_LOCAL(0), WASM_ONE)),
-                WASM_CALL_FUNCTION(runner.function_index(), WASM_GET_LOCAL(0)),
-                WASM_DROP, WASM_BR(1)));
+  f2.Build({WASM_LOOP(
+      WASM_BR_IF(0,
+                 WASM_BINOP(kExprI32GeU, WASM_LOCAL_GET(0), WASM_I32V_1(10))),
+      WASM_LOCAL_SET(0, WASM_BINOP(kExprI32Sub, WASM_LOCAL_GET(0), WASM_ONE)),
+      WASM_CALL_FUNCTION(runner.function_index(), WASM_LOCAL_GET(0)), WASM_DROP,
+      WASM_BR(1))});
 
   Isolate* isolate = runner.main_isolate();
   Handle<JSFunction> main_fun_wrapper =
@@ -406,13 +397,13 @@ WASM_COMPILED_EXEC_TEST(WasmStepInAndOut) {
 
   BreakHandler count_breaks(isolate,
                             {
-                                {19, BreakHandler::StepIn},   // LocalGet
-                                {21, BreakHandler::StepIn},   // Call
-                                {1, BreakHandler::StepOut},   // in f2
-                                {23, BreakHandler::Continue}  // After Call
+                                {19, BreakHandler::StepInto},  // LocalGet
+                                {21, BreakHandler::StepInto},  // Call
+                                {1, BreakHandler::StepOut},    // in f2
+                                {23, BreakHandler::Continue}   // After Call
                             });
 
-  Handle<Object> global(isolate->context().global_object(), isolate);
+  Handle<Object> global(isolate->context()->global_object(), isolate);
   CHECK(!Execution::Call(isolate, main_fun_wrapper, global, 0, nullptr)
              .is_null());
 }
@@ -423,14 +414,14 @@ WASM_COMPILED_EXEC_TEST(WasmGetLocalsAndStack) {
   runner.AllocateLocal(kWasmF32);
   runner.AllocateLocal(kWasmF64);
 
-  BUILD(runner,
-        // set [1] to 17
-        WASM_SET_LOCAL(1, WASM_I64V_1(17)),
-        // set [2] to <arg0> = 7
-        WASM_SET_LOCAL(2, WASM_F32_SCONVERT_I32(WASM_GET_LOCAL(0))),
-        // set [3] to <arg1>/2 = 8.5
-        WASM_SET_LOCAL(3, WASM_F64_DIV(WASM_F64_SCONVERT_I64(WASM_GET_LOCAL(1)),
-                                       WASM_F64(2))));
+  runner.Build(
+      {// set [1] to 17
+       WASM_LOCAL_SET(1, WASM_I64V_1(17)),
+       // set [2] to <arg0> = 7
+       WASM_LOCAL_SET(2, WASM_F32_SCONVERT_I32(WASM_LOCAL_GET(0))),
+       // set [3] to <arg1>/2 = 8.5
+       WASM_LOCAL_SET(3, WASM_F64_DIV(WASM_F64_SCONVERT_I64(WASM_LOCAL_GET(1)),
+                                      WASM_F64(2)))});
 
   Isolate* isolate = runner.main_isolate();
   Handle<JSFunction> main_fun_wrapper =
@@ -457,7 +448,7 @@ WASM_COMPILED_EXEC_TEST(WasmGetLocalsAndStack) {
           {wasmVec(7, 17L, 7.f, 8.5), wasmVec()},        // 10: end
       });
 
-  Handle<Object> global(isolate->context().global_object(), isolate);
+  Handle<Object> global(isolate->context()->global_object(), isolate);
   Handle<Object> args[]{handle(Smi::FromInt(7), isolate)};
   CHECK(!Execution::Call(isolate, main_fun_wrapper, global, 1, args).is_null());
 }
@@ -466,8 +457,8 @@ WASM_COMPILED_EXEC_TEST(WasmRemoveBreakPoint) {
   WasmRunner<int> runner(execution_tier);
   Isolate* isolate = runner.main_isolate();
 
-  BUILD(runner, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP,
-        WASM_I32V_1(14));
+  runner.Build(
+      {WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_I32V_1(14)});
 
   Handle<JSFunction> main_fun_wrapper =
       runner.builder().WrapCode(runner.function_index());
@@ -487,7 +478,7 @@ WASM_COMPILED_EXEC_TEST(WasmRemoveBreakPoint) {
                                        }},
                                       {4, BreakHandler::Continue}});
 
-  Handle<Object> global(isolate->context().global_object(), isolate);
+  Handle<Object> global(isolate->context()->global_object(), isolate);
   MaybeHandle<Object> retval =
       Execution::Call(isolate, main_fun_wrapper, global, 0, nullptr);
   CHECK_EQ(14, GetIntReturnValue(retval));
@@ -497,8 +488,8 @@ WASM_COMPILED_EXEC_TEST(WasmRemoveLastBreakPoint) {
   WasmRunner<int> runner(execution_tier);
   Isolate* isolate = runner.main_isolate();
 
-  BUILD(runner, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP,
-        WASM_I32V_1(14));
+  runner.Build(
+      {WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_I32V_1(14)});
 
   Handle<JSFunction> main_fun_wrapper =
       runner.builder().WrapCode(runner.function_index());
@@ -515,7 +506,7 @@ WASM_COMPILED_EXEC_TEST(WasmRemoveLastBreakPoint) {
                                    to_delete);
                  }}});
 
-  Handle<Object> global(isolate->context().global_object(), isolate);
+  Handle<Object> global(isolate->context()->global_object(), isolate);
   MaybeHandle<Object> retval =
       Execution::Call(isolate, main_fun_wrapper, global, 0, nullptr);
   CHECK_EQ(14, GetIntReturnValue(retval));
@@ -525,8 +516,8 @@ WASM_COMPILED_EXEC_TEST(WasmRemoveAllBreakPoint) {
   WasmRunner<int> runner(execution_tier);
   Isolate* isolate = runner.main_isolate();
 
-  BUILD(runner, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP,
-        WASM_I32V_1(14));
+  runner.Build(
+      {WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_NOP, WASM_I32V_1(14)});
 
   Handle<JSFunction> main_fun_wrapper =
       runner.builder().WrapCode(runner.function_index());
@@ -545,10 +536,49 @@ WASM_COMPILED_EXEC_TEST(WasmRemoveAllBreakPoint) {
                    ClearBreakpoint(&runner, runner.function_index(), 2, bp2);
                  }}});
 
-  Handle<Object> global(isolate->context().global_object(), isolate);
+  Handle<Object> global(isolate->context()->global_object(), isolate);
   MaybeHandle<Object> retval =
       Execution::Call(isolate, main_fun_wrapper, global, 0, nullptr);
   CHECK_EQ(14, GetIntReturnValue(retval));
+}
+
+WASM_COMPILED_EXEC_TEST(WasmBreakInPostMVP) {
+  // This test checks that we don't fail if experimental / post-MVP opcodes are
+  // being used. There was a bug where we were trying to update the "detected"
+  // features set, but we were passing a nullptr when compiling with
+  // breakpoints.
+  WasmRunner<int> runner(execution_tier);
+  Isolate* isolate = runner.main_isolate();
+
+  // [] -> [i32, i32]
+  ValueType sig_types[] = {kWasmI32, kWasmI32};
+  FunctionSig sig{2, 0, sig_types};
+  uint8_t sig_idx = runner.builder().AddSignature(&sig);
+
+  constexpr int kReturn = 13;
+  constexpr int kIgnored = 23;
+  runner.Build(
+      {WASM_BLOCK_X(sig_idx, WASM_I32V_1(kReturn), WASM_I32V_1(kIgnored)),
+       WASM_DROP});
+
+  Handle<JSFunction> main_fun_wrapper =
+      runner.builder().WrapCode(runner.function_index());
+
+  SetBreakpoint(&runner, runner.function_index(), 3, 3);
+
+  BreakHandler count_breaks(isolate, {{3, BreakHandler::Continue}});
+
+  Handle<Object> global(isolate->context()->global_object(), isolate);
+  MaybeHandle<Object> retval =
+      Execution::Call(isolate, main_fun_wrapper, global, 0, nullptr);
+  CHECK_EQ(kReturn, GetIntReturnValue(retval));
+}
+
+WASM_COMPILED_EXEC_TEST(Regress10889) {
+  FLAG_SCOPE(print_wasm_code);
+  WasmRunner<int> runner(execution_tier);
+  runner.Build({WASM_I32V_1(0)});
+  SetBreakpoint(&runner, runner.function_index(), 1, 1);
 }
 
 }  // namespace wasm

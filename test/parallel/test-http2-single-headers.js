@@ -19,7 +19,7 @@ const singles = [
   'if-unmodified-since',
   'from',
   'location',
-  'max-forwards'
+  'max-forwards',
 ];
 
 server.on('stream', common.mustNotCall());
@@ -27,7 +27,7 @@ server.on('stream', common.mustNotCall());
 server.listen(0, common.mustCall(() => {
   const client = http2.connect(`http://localhost:${server.address().port}`);
 
-  singles.forEach((i) => {
+  for (const i of singles) {
     assert.throws(
       () => client.request({ [i]: 'abc', [i.toUpperCase()]: 'xyz' }),
       {
@@ -45,7 +45,7 @@ server.listen(0, common.mustCall(() => {
         message: `Header field "${i}" must only have a single value`
       }
     );
-  });
+  }
 
   server.close();
   client.close();

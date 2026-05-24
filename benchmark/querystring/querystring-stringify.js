@@ -3,7 +3,7 @@ const common = require('../common.js');
 const querystring = require('querystring');
 
 const bench = common.createBenchmark(main, {
-  type: ['noencode', 'encodemany', 'encodelast', 'array'],
+  type: ['noencode', 'encodemany', 'encodelast', 'array', 'multiprimitives'],
   n: [1e6],
 });
 
@@ -12,23 +12,28 @@ function main({ type, n }) {
     noencode: {
       foo: 'bar',
       baz: 'quux',
-      xyzzy: 'thud'
+      xyzzy: 'thud',
     },
     encodemany: {
       '\u0080\u0083\u0089': 'bar',
       '\u008C\u008E\u0099': 'quux',
-      'xyzzy': '\u00A5q\u00A3r'
+      'xyzzy': '\u00A5q\u00A3r',
     },
     encodelast: {
       foo: 'bar',
       baz: 'quux',
-      xyzzy: 'thu\u00AC'
+      xyzzy: 'thu\u00AC',
     },
     array: {
       foo: [],
       baz: ['bar'],
-      xyzzy: ['bar', 'quux', 'thud']
-    }
+      xyzzy: ['bar', 'quux', 'thud'],
+    },
+    multiprimitives: {
+      foo: false,
+      bar: -13.37,
+      baz: '',
+    },
   };
   const input = inputs[type];
 

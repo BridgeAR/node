@@ -1,18 +1,28 @@
-
-/* Copyright 1998 by the Massachusetts Institute of Technology.
- * Copyright (C) 2007-2013 by Daniel Stenberg
+/* MIT License
  *
- * Permission to use, copy, modify, and distribute this
- * software and its documentation for any purpose and without
- * fee is hereby granted, provided that the above copyright
- * notice appear in all copies and that both that copyright
- * notice and this permission notice appear in supporting
- * documentation, and that the name of M.I.T. not be used in
- * advertising or publicity pertaining to distribution of the
- * software without specific, written prior permission.
- * M.I.T. makes no representations about the suitability of
- * this software for any purpose.  It is provided "as is"
- * without express or implied warranty.
+ * Copyright (c) Massachusetts Institute of Technology
+ * Copyright (c) Daniel Stenberg
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 #ifndef ARES__H
@@ -39,7 +49,7 @@
 #if defined(_AIX) || defined(__NOVELL_LIBC__) || defined(__NetBSD__) || \
     defined(__minix) || defined(__SYMBIAN32__) || defined(__INTEGRITY) || \
     defined(ANDROID) || defined(__ANDROID__) || defined(__OpenBSD__) || \
-    defined(__QNXNTO__)
+    defined(__QNXNTO__) || defined(__MVS__) || defined(__HAIKU__)
 #include <sys/select.h>
 #endif
 #if (defined(NETWARE) && !defined(__NOVELL_LIBC__))
@@ -63,6 +73,13 @@
 #  include <windows.h>
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
+/* To aid with linking against a static c-ares build, lets tell the microsoft
+ * compiler to pull in needed dependencies */
+#  ifdef _MSC_VER
+#    pragma comment(lib, "ws2_32")
+#    pragma comment(lib, "advapi32")
+#    pragma comment(lib, "iphlpapi")
+#  endif
 #else
 #  include <sys/socket.h>
 #  include <netinet/in.h>
@@ -150,24 +167,26 @@ extern "C" {
 #define ARES_FLAG_EDNS          (1 << 8)
 
 /* Option mask values */
-#define ARES_OPT_FLAGS          (1 << 0)
-#define ARES_OPT_TIMEOUT        (1 << 1)
-#define ARES_OPT_TRIES          (1 << 2)
-#define ARES_OPT_NDOTS          (1 << 3)
-#define ARES_OPT_UDP_PORT       (1 << 4)
-#define ARES_OPT_TCP_PORT       (1 << 5)
-#define ARES_OPT_SERVERS        (1 << 6)
-#define ARES_OPT_DOMAINS        (1 << 7)
-#define ARES_OPT_LOOKUPS        (1 << 8)
-#define ARES_OPT_SOCK_STATE_CB  (1 << 9)
-#define ARES_OPT_SORTLIST       (1 << 10)
-#define ARES_OPT_SOCK_SNDBUF    (1 << 11)
-#define ARES_OPT_SOCK_RCVBUF    (1 << 12)
-#define ARES_OPT_TIMEOUTMS      (1 << 13)
-#define ARES_OPT_ROTATE         (1 << 14)
-#define ARES_OPT_EDNSPSZ        (1 << 15)
-#define ARES_OPT_NOROTATE       (1 << 16)
-#define ARES_OPT_RESOLVCONF     (1 << 17)
+#define ARES_OPT_FLAGS           (1 << 0)
+#define ARES_OPT_TIMEOUT         (1 << 1)
+#define ARES_OPT_TRIES           (1 << 2)
+#define ARES_OPT_NDOTS           (1 << 3)
+#define ARES_OPT_UDP_PORT        (1 << 4)
+#define ARES_OPT_TCP_PORT        (1 << 5)
+#define ARES_OPT_SERVERS         (1 << 6)
+#define ARES_OPT_DOMAINS         (1 << 7)
+#define ARES_OPT_LOOKUPS         (1 << 8)
+#define ARES_OPT_SOCK_STATE_CB   (1 << 9)
+#define ARES_OPT_SORTLIST        (1 << 10)
+#define ARES_OPT_SOCK_SNDBUF     (1 << 11)
+#define ARES_OPT_SOCK_RCVBUF     (1 << 12)
+#define ARES_OPT_TIMEOUTMS       (1 << 13)
+#define ARES_OPT_ROTATE          (1 << 14)
+#define ARES_OPT_EDNSPSZ         (1 << 15)
+#define ARES_OPT_NOROTATE        (1 << 16)
+#define ARES_OPT_RESOLVCONF      (1 << 17)
+#define ARES_OPT_HOSTS_FILE      (1 << 18)
+#define ARES_OPT_UDP_MAX_QUERIES (1 << 19)
 
 /* Nameinfo flag values */
 #define ARES_NI_NOFQDN                  (1 << 0)
@@ -277,6 +296,8 @@ struct ares_options {
   int nsort;
   int ednspsz;
   char *resolvconf_path;
+  char *hosts_path;
+  int udp_max_queries;
 };
 
 struct hostent;
@@ -528,6 +549,15 @@ struct ares_addr6ttl {
   int             ttl;
 };
 
+struct ares_caa_reply {
+  struct ares_caa_reply  *next;
+  int                     critical;
+  unsigned char          *property;
+  size_t                  plength;  /* plength excludes null termination */
+  unsigned char          *value;
+  size_t                  length;   /* length excludes null termination */
+};
+
 struct ares_srv_reply {
   struct ares_srv_reply  *next;
   char                   *host;
@@ -579,6 +609,14 @@ struct ares_soa_reply {
   unsigned int minttl;
 };
 
+struct ares_uri_reply {
+  struct ares_uri_reply  *next;
+  unsigned short          priority;
+  unsigned short          weight;
+  char                   *uri;
+  int                     ttl;
+};
+
 /*
  * Similar to addrinfo, but with extra ttl and missing canonname.
  */
@@ -608,6 +646,7 @@ struct ares_addrinfo_cname {
 struct ares_addrinfo {
   struct ares_addrinfo_cname *cnames;
   struct ares_addrinfo_node  *nodes;
+  char                       *name;
 };
 
 struct ares_addrinfo_hints {
@@ -636,6 +675,10 @@ CARES_EXTERN int ares_parse_aaaa_reply(const unsigned char *abuf,
                                        struct hostent **host,
                                        struct ares_addr6ttl *addrttls,
                                        int *naddrttls);
+
+CARES_EXTERN int ares_parse_caa_reply(const unsigned char* abuf,
+				      int alen,
+				      struct ares_caa_reply** caa_out);
 
 CARES_EXTERN int ares_parse_ptr_reply(const unsigned char *abuf,
                                       int alen,
@@ -671,6 +714,10 @@ CARES_EXTERN int ares_parse_naptr_reply(const unsigned char* abuf,
 CARES_EXTERN int ares_parse_soa_reply(const unsigned char* abuf,
 				      int alen,
 				      struct ares_soa_reply** soa_out);
+
+CARES_EXTERN int ares_parse_uri_reply(const unsigned char* abuf,
+                                      int alen,
+                                      struct ares_uri_reply** uri_out);
 
 CARES_EXTERN void ares_free_string(void *str);
 

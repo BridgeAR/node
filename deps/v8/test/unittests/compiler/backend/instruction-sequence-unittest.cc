@@ -14,7 +14,7 @@ namespace compiler {
 
 namespace {
 constexpr int kMaxNumAllocatable =
-    Max(Register::kNumRegisters, DoubleRegister::kNumRegisters);
+    std::max(Register::kNumRegisters, DoubleRegister::kNumRegisters);
 static std::array<int, kMaxNumAllocatable> kAllocatableCodes =
     base::make_array<kMaxNumAllocatable>(
         [](size_t i) { return static_cast<int>(i); });
@@ -24,9 +24,16 @@ InstructionSequenceTest::InstructionSequenceTest()
     : sequence_(nullptr),
       num_general_registers_(Register::kNumRegisters),
       num_double_registers_(DoubleRegister::kNumRegisters),
+      num_simd128_registers_(Simd128Register::kNumRegisters),
+#if V8_TARGET_ARCH_X64
+      num_simd256_registers_(Simd256Register::kNumRegisters),
+#else
+      num_simd256_registers_(0),
+#endif  // V8_TARGET_ARCH_X64
       instruction_blocks_(zone()),
       current_block_(nullptr),
-      block_returns_(false) {}
+      block_returns_(false) {
+}
 
 void InstructionSequenceTest::SetNumRegs(int num_general_registers,
                                          int num_double_registers) {
@@ -47,6 +54,8 @@ int InstructionSequenceTest::GetNumRegs(MachineRepresentation rep) {
       return config()->num_double_registers();
     case MachineRepresentation::kSimd128:
       return config()->num_simd128_registers();
+    case MachineRepresentation::kSimd256:
+      return config()->num_simd256_registers();
     default:
       return config()->num_general_registers();
   }
@@ -61,6 +70,8 @@ int InstructionSequenceTest::GetAllocatableCode(int index,
       return config()->GetAllocatableDoubleCode(index);
     case MachineRepresentation::kSimd128:
       return config()->GetAllocatableSimd128Code(index);
+    case MachineRepresentation::kSimd256:
+      return config()->GetAllocatableSimd256Code(index);
     default:
       return config()->GetAllocatableGeneralCode(index);
   }
@@ -69,19 +80,19 @@ int InstructionSequenceTest::GetAllocatableCode(int index,
 const RegisterConfiguration* InstructionSequenceTest::config() {
   if (!config_) {
     config_.reset(new RegisterConfiguration(
-        num_general_registers_, num_double_registers_, num_general_registers_,
-        num_double_registers_, kAllocatableCodes.data(),
-        kAllocatableCodes.data(),
-        kSimpleFPAliasing ? RegisterConfiguration::OVERLAP
-                          : RegisterConfiguration::COMBINE));
+        kFPAliasing, num_general_registers_, num_double_registers_,
+        num_simd128_registers_, num_simd256_registers_, num_general_registers_,
+        num_double_registers_, num_simd128_registers_, num_simd256_registers_,
+        kAllocatableCodes.data(), kAllocatableCodes.data(),
+        kAllocatableCodes.data()));
   }
   return config_.get();
 }
 
 InstructionSequence* InstructionSequenceTest::sequence() {
   if (sequence_ == nullptr) {
-    sequence_ = new (zone())
-        InstructionSequence(isolate(), zone(), &instruction_blocks_);
+    sequence_ = zone()->New<InstructionSequence>(isolate(), zone(),
+                                                 &instruction_blocks_);
     sequence_->SetRegisterConfigurationForTesting(
         InstructionSequenceTest::config());
   }
@@ -119,11 +130,11 @@ Instruction* InstructionSequenceTest::EndBlock(BlockCompletion completion) {
     case kBlockEnd:
       break;
     case kFallThrough:
-      result = EmitJump();
+      result = EmitJump(completion.op_);
       break;
     case kJump:
       CHECK(!block_returns_);
-      result = EmitJump();
+      result = EmitJump(completion.op_);
       break;
     case kBranch:
       CHECK(!block_returns_);
@@ -170,7 +181,7 @@ PhiInstruction* InstructionSequenceTest::Phi(VReg incoming_vreg_0,
     if (inputs[input_count].value_ == kNoValue) break;
   }
   CHECK_LT(0, input_count);
-  auto phi = new (zone()) PhiInstruction(zone(), NewReg().value_, input_count);
+  auto phi = zone()->New<PhiInstruction>(zone(), NewReg().value_, input_count);
   for (size_t i = 0; i < input_count; ++i) {
     SetInput(phi, i, inputs[i]);
   }
@@ -180,7 +191,7 @@ PhiInstruction* InstructionSequenceTest::Phi(VReg incoming_vreg_0,
 
 PhiInstruction* InstructionSequenceTest::Phi(VReg incoming_vreg_0,
                                              size_t input_count) {
-  auto phi = new (zone()) PhiInstruction(zone(), NewReg().value_, input_count);
+  auto phi = zone()->New<PhiInstruction>(zone(), NewReg().value_, input_count);
   SetInput(phi, 0, incoming_vreg_0);
   current_block_->AddPhi(phi);
   return phi;
@@ -295,8 +306,8 @@ Instruction* InstructionSequenceTest::EmitFallThrough() {
   return AddInstruction(instruction);
 }
 
-Instruction* InstructionSequenceTest::EmitJump() {
-  InstructionOperand inputs[1]{ConvertInputOp(Imm())};
+Instruction* InstructionSequenceTest::EmitJump(TestOperand input_op) {
+  InstructionOperand inputs[1]{ConvertInputOp(input_op)};
   auto instruction = NewInstruction(kArchJmp, 0, nullptr, 1, inputs);
   return AddInstruction(instruction);
 }
@@ -334,7 +345,7 @@ InstructionOperand InstructionSequenceTest::Unallocated(
 InstructionOperand* InstructionSequenceTest::ConvertInputs(
     size_t input_size, TestOperand* inputs) {
   InstructionOperand* mapped_inputs =
-      zone()->NewArray<InstructionOperand>(static_cast<int>(input_size));
+      zone()->AllocateArray<InstructionOperand>(static_cast<int>(input_size));
   for (size_t i = 0; i < input_size; ++i) {
     mapped_inputs[i] = ConvertInputOp(inputs[i]);
   }
@@ -344,7 +355,7 @@ InstructionOperand* InstructionSequenceTest::ConvertInputs(
 InstructionOperand InstructionSequenceTest::ConvertInputOp(TestOperand op) {
   if (op.type_ == kImmediate) {
     CHECK_EQ(op.vreg_.value_, kNoValue);
-    return ImmediateOperand(ImmediateOperand::INLINE, op.value_);
+    return ImmediateOperand(ImmediateOperand::INLINE_INT32, op.value_);
   }
   CHECK_NE(op.vreg_.value_, kNoValue);
   switch (op.type_) {
@@ -361,6 +372,9 @@ InstructionOperand InstructionSequenceTest::ConvertInputOp(TestOperand op) {
     case kSlot:
       return Unallocated(op, UnallocatedOperand::MUST_HAVE_SLOT,
                          UnallocatedOperand::USED_AT_START);
+    case kDeoptArg:
+      return Unallocated(op, UnallocatedOperand::REGISTER_OR_SLOT,
+                         UnallocatedOperand::USED_AT_END);
     case kFixedRegister: {
       MachineRepresentation rep = GetCanonicalRep(op);
       CHECK(0 <= op.value_ && op.value_ < GetNumRegs(rep));
@@ -391,8 +405,8 @@ InstructionOperand InstructionSequenceTest::ConvertOutputOp(VReg vreg,
   CHECK_EQ(op.vreg_.value_, kNoValue);
   op.vreg_ = vreg;
   switch (op.type_) {
-    case kSameAsFirst:
-      return Unallocated(op, UnallocatedOperand::SAME_AS_FIRST_INPUT);
+    case kSameAsInput:
+      return Unallocated(op, UnallocatedOperand::SAME_AS_INPUT);
     case kRegister:
       return Unallocated(op, UnallocatedOperand::MUST_HAVE_REGISTER);
     case kFixedSlot:
@@ -441,8 +455,8 @@ InstructionBlock* InstructionSequenceTest::NewBlock(bool deferred) {
     }
   }
   // Construct instruction block.
-  auto instruction_block = new (zone())
-      InstructionBlock(zone(), rpo, loop_header, loop_end, deferred, false);
+  auto instruction_block = zone()->New<InstructionBlock>(
+      zone(), rpo, loop_header, loop_end, Rpo::Invalid(), deferred, false);
   instruction_blocks_.push_back(instruction_block);
   current_block_ = instruction_block;
   sequence()->StartBlock(rpo);
@@ -478,6 +492,7 @@ void InstructionSequenceTest::WireBlocks() {
     }
     ++offset;
   }
+  CalculateDominators();
 }
 
 void InstructionSequenceTest::WireBlock(size_t block_offset, int jump_offset) {
@@ -488,6 +503,42 @@ void InstructionSequenceTest::WireBlock(size_t block_offset, int jump_offset) {
   auto target = instruction_blocks_[target_block_offset];
   block->successors().push_back(target->rpo_number());
   target->predecessors().push_back(block->rpo_number());
+}
+
+void InstructionSequenceTest::CalculateDominators() {
+  CHECK_GT(instruction_blocks_.size(), 0);
+  ZoneVector<int> dominator_depth(instruction_blocks_.size(), -1, zone());
+
+  CHECK_EQ(instruction_blocks_[0]->rpo_number(), RpoNumber::FromInt(0));
+  dominator_depth[0] = 0;
+  instruction_blocks_[0]->set_dominator(RpoNumber::FromInt(0));
+
+  for (size_t i = 1; i < instruction_blocks_.size(); i++) {
+    InstructionBlock* block = instruction_blocks_[i];
+    auto pred = block->predecessors().begin();
+    auto end = block->predecessors().end();
+    DCHECK(pred != end);  // All blocks except start have predecessors.
+    RpoNumber dominator = *pred;
+    // For multiple predecessors, walk up the dominator tree until a common
+    // dominator is found. Visitation order guarantees that all predecessors
+    // except for backwards edges have been visited.
+    for (++pred; pred != end; ++pred) {
+      // Don't examine backwards edges.
+      if (dominator_depth[pred->ToInt()] < 0) continue;
+
+      RpoNumber other = *pred;
+      while (dominator != other) {
+        if (dominator_depth[dominator.ToInt()] <
+            dominator_depth[other.ToInt()]) {
+          other = instruction_blocks_[other.ToInt()]->dominator();
+        } else {
+          dominator = instruction_blocks_[dominator.ToInt()]->dominator();
+        }
+      }
+    }
+    block->set_dominator(dominator);
+    dominator_depth[i] = dominator_depth[dominator.ToInt()] + 1;
+  }
 }
 
 Instruction* InstructionSequenceTest::Emit(

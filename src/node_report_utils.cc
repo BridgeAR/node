@@ -3,10 +3,8 @@
 #include "node_report.h"
 #include "util-inl.h"
 
+namespace node {
 namespace report {
-
-using node::JSONWriter;
-using node::MallocedBuffer;
 
 static constexpr auto null = JSONWriter::Null{};
 
@@ -82,44 +80,78 @@ static void ReportEndpoints(uv_handle_t* h, JSONWriter* writer) {
   ReportEndpoint(h, rc == 0 ? addr : nullptr, "remoteEndpoint", writer);
 }
 
+// Utility function to format libuv pipe information.
+static void ReportPipeEndpoints(uv_handle_t* h, JSONWriter* writer) {
+  uv_any_handle* handle = reinterpret_cast<uv_any_handle*>(h);
+  MaybeStackBuffer<char> buffer;
+  size_t buffer_size = buffer.capacity();
+  int rc = -1;
+
+  // First call to get required buffer size.
+  rc = uv_pipe_getsockname(&handle->pipe, buffer.out(), &buffer_size);
+  if (rc == UV_ENOBUFS) {
+    buffer.AllocateSufficientStorage(buffer_size);
+    rc = uv_pipe_getsockname(&handle->pipe, buffer.out(), &buffer_size);
+  }
+  if (rc == 0 && buffer_size != 0) {
+    buffer.SetLength(buffer_size);
+    writer->json_keyvalue("localEndpoint", buffer.ToStringView());
+  } else {
+    writer->json_keyvalue("localEndpoint", null);
+  }
+
+  // First call to get required buffer size.
+  buffer_size = buffer.capacity();
+  rc = uv_pipe_getpeername(&handle->pipe, buffer.out(), &buffer_size);
+  if (rc == UV_ENOBUFS) {
+    buffer.AllocateSufficientStorage(buffer_size);
+    rc = uv_pipe_getpeername(&handle->pipe, buffer.out(), &buffer_size);
+  }
+  if (rc == 0 && buffer_size != 0) {
+    buffer.SetLength(buffer_size);
+    writer->json_keyvalue("remoteEndpoint", buffer.ToStringView());
+  } else {
+    writer->json_keyvalue("remoteEndpoint", null);
+  }
+}
+
 // Utility function to format libuv path information.
 static void ReportPath(uv_handle_t* h, JSONWriter* writer) {
-  MallocedBuffer<char> buffer(0);
+  MaybeStackBuffer<char> buffer;
   int rc = -1;
-  size_t size = 0;
+  size_t size = buffer.capacity();
   uv_any_handle* handle = reinterpret_cast<uv_any_handle*>(h);
-  bool wrote_filename = false;
   // First call to get required buffer size.
   switch (h->type) {
     case UV_FS_EVENT:
-      rc = uv_fs_event_getpath(&(handle->fs_event), buffer.data, &size);
+      rc = uv_fs_event_getpath(&(handle->fs_event), buffer.out(), &size);
       break;
     case UV_FS_POLL:
-      rc = uv_fs_poll_getpath(&(handle->fs_poll), buffer.data, &size);
+      rc = uv_fs_poll_getpath(&(handle->fs_poll), buffer.out(), &size);
       break;
     default:
       break;
   }
   if (rc == UV_ENOBUFS) {
-    buffer = MallocedBuffer<char>(size + 1);
+    buffer.AllocateSufficientStorage(size);
     switch (h->type) {
       case UV_FS_EVENT:
-        rc = uv_fs_event_getpath(&(handle->fs_event), buffer.data, &size);
+        rc = uv_fs_event_getpath(&(handle->fs_event), buffer.out(), &size);
         break;
       case UV_FS_POLL:
-        rc = uv_fs_poll_getpath(&(handle->fs_poll), buffer.data, &size);
+        rc = uv_fs_poll_getpath(&(handle->fs_poll), buffer.out(), &size);
         break;
       default:
         break;
     }
-    if (rc == 0) {
-      // buffer is not null terminated.
-      buffer.data[size] = '\0';
-      writer->json_keyvalue("filename", buffer.data);
-      wrote_filename = true;
-    }
   }
-  if (!wrote_filename) writer->json_keyvalue("filename", null);
+
+  if (rc == 0 && size > 0) {
+    buffer.SetLength(size);
+    writer->json_keyvalue("filename", buffer.ToStringView());
+  } else {
+    writer->json_keyvalue("filename", null);
+  }
 }
 
 // Utility function to walk libuv handles.
@@ -147,6 +179,9 @@ void WalkHandle(uv_handle_t* h, void* arg) {
     case UV_UDP:
       ReportEndpoints(h, writer);
       break;
+    case UV_NAMED_PIPE:
+      ReportPipeEndpoints(h, writer);
+      break;
     case UV_TIMER: {
       uint64_t due = handle->timer.timeout;
       uint64_t now = uv_now(handle->timer.loop);
@@ -169,8 +204,7 @@ void WalkHandle(uv_handle_t* h, void* arg) {
       // SIGWINCH is used by libuv so always appears.
       // See http://docs.libuv.org/en/v1.x/signal.html
       writer->json_keyvalue("signum", handle->signal.signum);
-      writer->json_keyvalue("signal",
-                            node::signo_string(handle->signal.signum));
+      writer->json_keyvalue("signal", signo_string(handle->signal.signum));
       break;
     default:
       break;
@@ -223,8 +257,16 @@ void WalkHandle(uv_handle_t* h, void* arg) {
     writer->json_keyvalue("writable",
                           static_cast<bool>(uv_is_writable(&handle->stream)));
   }
-
+  if (h->type == UV_UDP) {
+    writer->json_keyvalue(
+        "writeQueueSize",
+        uv_udp_get_send_queue_size(reinterpret_cast<uv_udp_t*>(h)));
+    writer->json_keyvalue(
+        "writeQueueCount",
+        uv_udp_get_send_queue_count(reinterpret_cast<uv_udp_t*>(h)));
+  }
   writer->json_end();
 }
 
 }  // namespace report
+}  // namespace node

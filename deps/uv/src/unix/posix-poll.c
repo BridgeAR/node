@@ -132,11 +132,12 @@ static void uv__pollfds_del(uv_loop_t* loop, int fd) {
 
 
 void uv__io_poll(uv_loop_t* loop, int timeout) {
+  uv__loop_internal_fields_t* lfields;
   sigset_t* pset;
   sigset_t set;
   uint64_t time_base;
   uint64_t time_diff;
-  QUEUE* q;
+  struct uv__queue* q;
   uv__io_t* w;
   size_t i;
   unsigned int nevents;
@@ -144,19 +145,23 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int have_signals;
   struct pollfd* pe;
   int fd;
+  int user_timeout;
+  int reset_timeout;
 
   if (loop->nfds == 0) {
-    assert(QUEUE_EMPTY(&loop->watcher_queue));
+    assert(uv__queue_empty(&loop->watcher_queue));
     return;
   }
 
-  /* Take queued watchers and add their fds to our poll fds array.  */
-  while (!QUEUE_EMPTY(&loop->watcher_queue)) {
-    q = QUEUE_HEAD(&loop->watcher_queue);
-    QUEUE_REMOVE(q);
-    QUEUE_INIT(q);
+  lfields = uv__get_internal_fields(loop);
 
-    w = QUEUE_DATA(q, uv__io_t, watcher_queue);
+  /* Take queued watchers and add their fds to our poll fds array.  */
+  while (!uv__queue_empty(&loop->watcher_queue)) {
+    q = uv__queue_head(&loop->watcher_queue);
+    uv__queue_remove(q);
+    uv__queue_init(q);
+
+    w = uv__queue_data(q, uv__io_t, watcher_queue);
     assert(w->pevents != 0);
     assert(w->fd >= 0);
     assert(w->fd < (int) loop->nwatchers);
@@ -177,11 +182,31 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   assert(timeout >= -1);
   time_base = loop->time;
 
+  if (lfields->flags & UV_METRICS_IDLE_TIME) {
+    reset_timeout = 1;
+    user_timeout = timeout;
+    timeout = 0;
+  } else {
+    reset_timeout = 0;
+  }
+
   /* Loop calls to poll() and processing of results.  If we get some
    * results from poll() but they turn out not to be interesting to
    * our caller then we need to loop around and poll() again.
    */
   for (;;) {
+    /* Only need to set the provider_entry_time if timeout != 0. The function
+     * will return early if the loop isn't configured with UV_METRICS_IDLE_TIME.
+     */
+    if (timeout != 0)
+      uv__metrics_set_provider_entry_time(loop);
+
+    /* Store the current timeout in a location that's globally accessible so
+     * other locations like uv__work_done() can determine whether the queue
+     * of events in the callback were waiting when poll was called.
+     */
+    lfields->current_timeout = timeout;
+
     if (pset != NULL)
       if (pthread_sigmask(SIG_BLOCK, pset, NULL))
         abort();
@@ -197,6 +222,15 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     SAVE_ERRNO(uv__update_time(loop));
 
     if (nfds == 0) {
+      if (reset_timeout != 0) {
+        timeout = user_timeout;
+        reset_timeout = 0;
+        if (timeout == -1)
+          continue;
+        if (timeout > 0)
+          goto update_timeout;
+      }
+
       assert(timeout != -1);
       return;
     }
@@ -204,6 +238,11 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     if (nfds == -1) {
       if (errno != EINTR)
         abort();
+
+      if (reset_timeout != 0) {
+        timeout = user_timeout;
+        reset_timeout = 0;
+      }
 
       if (timeout == -1)
         continue;
@@ -254,6 +293,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
         if (w == &loop->signal_io_watcher) {
           have_signals = 1;
         } else {
+          uv__metrics_update_idle_time(loop);
           w->cb(loop, w, pe->revents);
         }
 
@@ -261,8 +301,17 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
       }
     }
 
-    if (have_signals != 0)
+    uv__metrics_inc_events(loop, nevents);
+    if (reset_timeout != 0) {
+      timeout = user_timeout;
+      reset_timeout = 0;
+      uv__metrics_inc_events_waiting(loop, nevents);
+    }
+
+    if (have_signals != 0) {
+      uv__metrics_update_idle_time(loop);
       loop->signal_io_watcher.cb(loop, &loop->signal_io_watcher, POLLIN);
+    }
 
     loop->poll_fds_iterating = 0;
 

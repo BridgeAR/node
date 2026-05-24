@@ -12,8 +12,8 @@ const server = http2.createServer();
 let session;
 
 const countdown = new Countdown(2, () => {
-  server.close(common.mustCall());
-  session.destroy();
+  server.close(common.mustSucceed());
+  session.close();
 });
 
 server.listen(0, common.mustCall(() => {

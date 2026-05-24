@@ -8,9 +8,9 @@ const assert = require('assert');
 const cluster = require('cluster');
 const os = require('os');
 
-if (cluster.isMaster) {
+if (cluster.isPrimary) {
   const workers = [];
-  const numCPUs = os.cpus().length;
+  const numCPUs = os.availableParallelism();
   let waitOnline = numCPUs;
   for (let i = 0; i < numCPUs; i++) {
     const worker = cluster.fork();
@@ -26,7 +26,11 @@ if (cluster.isMaster) {
     // to send messages when the worker is disconnecting.
     worker.on('error', (err) => {
       assert.strictEqual(err.syscall, 'write');
-      assert.strictEqual(err.code, 'EPIPE');
+      if (common.isOSX) {
+        assert(['EPIPE', 'ENOTCONN'].includes(err.code), err);
+      } else {
+        assert(['EPIPE', 'ECONNRESET'].includes(err.code), err);
+      }
     });
 
     worker.once('disconnect', common.mustCall(() => {

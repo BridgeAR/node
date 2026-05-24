@@ -13,7 +13,7 @@ const cluster = require('cluster');
 const dgram = require('dgram');
 const BYE = 'bye';
 
-if (cluster.isMaster) {
+if (cluster.isPrimary) {
   const worker1 = cluster.fork();
 
   // Verify that Windows doesn't support this scenario
@@ -40,7 +40,7 @@ if (cluster.isMaster) {
       worker2.send(BYE);
     });
   });
-  // end master code
+  // end primary code
 } else {
   // worker code
   process.on('message', (msg) => msg === BYE && process.exit(0));
@@ -51,6 +51,6 @@ if (cluster.isMaster) {
   socket1.on('error', PRT1 === 0 ? () => {} : assert.fail);
   socket1.bind(
     { address: common.localhostIPv4, port: PRT1, exclusive: false },
-    () => process.send({ message: 'success', port1: socket1.address().port })
+    () => process.send({ message: 'success', port1: socket1.address().port }),
   );
 }

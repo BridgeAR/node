@@ -1,175 +1,136 @@
-// Copyright 2006-2008 the V8 project authors. All rights reserved.
+// Copyright 2020 the V8 project authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef V8_SNAPSHOT_SNAPSHOT_H_
 #define V8_SNAPSHOT_SNAPSHOT_H_
 
-#include "src/snapshot/partial-serializer.h"
-#include "src/snapshot/startup-serializer.h"
+#include <vector>
 
-#include "src/utils/utils.h"
+#include "include/v8-array-buffer.h"  // For ArrayBuffer::Allocator.
+#include "include/v8-snapshot.h"  // For StartupData.
+#include "src/common/assert-scope.h"
+#include "src/common/globals.h"
 
 namespace v8 {
 namespace internal {
 
-// Forward declarations.
+class Context;
 class Isolate;
-class PartialSerializer;
-class SnapshotCompression;
-class StartupSerializer;
-
-// Wrapper around reservation sizes and the serialization payload.
-class V8_EXPORT_PRIVATE SnapshotData : public SerializedData {
- public:
-  // Used when producing.
-  explicit SnapshotData(const Serializer* serializer);
-
-  // Used when consuming.
-  explicit SnapshotData(const Vector<const byte> snapshot)
-      : SerializedData(const_cast<byte*>(snapshot.begin()), snapshot.length()) {
-  }
-
-  std::vector<Reservation> Reservations() const;
-  virtual Vector<const byte> Payload() const;
-
-  Vector<const byte> RawData() const {
-    return Vector<const byte>(data_, size_);
-  }
-
- protected:
-  // Empty constructor used by SnapshotCompression so it can manually allocate
-  // memory.
-  SnapshotData() : SerializedData() {}
-  friend class SnapshotCompression;
-
-  // Resize used by SnapshotCompression so it can shrink the compressed
-  // SnapshotData.
-  void Resize(uint32_t size) { size_ = size; }
-
-  // The data header consists of uint32_t-sized entries:
-  // [0] magic number and (internal) external reference count
-  // [1] number of reservation size entries
-  // [2] payload length
-  // ... reservations
-  // ... serialized payload
-  static const uint32_t kNumReservationsOffset =
-      kMagicNumberOffset + kUInt32Size;
-  static const uint32_t kPayloadLengthOffset =
-      kNumReservationsOffset + kUInt32Size;
-  static const uint32_t kHeaderSize = kPayloadLengthOffset + kUInt32Size;
-};
+class JSGlobalProxy;
+class SafepointScope;
+class SnapshotData;
 
 class Snapshot : public AllStatic {
  public:
-  // ---------------- Deserialization ----------------
+  // ---------------- Serialization -------------------------------------------
+
+  enum SerializerFlag {
+    // If set, serializes unknown external references as verbatim data. This
+    // usually leads to invalid state if the snapshot is deserialized in a
+    // different isolate or a different process.
+    // If unset, all external references must be known to the encoder.
+    kAllowUnknownExternalReferencesForTesting = 1 << 0,
+    // If set, the serializer enters a more permissive mode which allows
+    // serialization of a currently active, running isolate. This has multiple
+    // effects; for example, open handles are allowed, microtasks may exist,
+    // etc. Note that in this mode, the serializer is allowed to skip
+    // visitation of certain problematic areas even if they are non-empty. The
+    // resulting snapshot is not guaranteed to result in a runnable context
+    // after deserialization.
+    // If unset, we assert that these previously mentioned areas are empty.
+    kAllowActiveIsolateForTesting = 1 << 1,
+    // If set, the ReadOnlySerializer and the SharedHeapSerializer reconstructs
+    // their respective object caches from the existing ReadOnlyHeap's read-only
+    // object cache or the existing shared heap's object cache so the same
+    // mapping is used.  This mode is used for testing deserialization of a
+    // snapshot from a live isolate that's using a shared ReadOnlyHeap or is
+    // attached to a shared isolate. Otherwise during deserialization the
+    // indices will mismatch, causing deserialization crashes when e.g. types
+    // mismatch.  If unset, the read-only object cache is populated as read-only
+    // objects are serialized, and the shared heap object cache is populated as
+    // shared heap objects are serialized.
+    kReconstructReadOnlyAndSharedObjectCachesForTesting = 1 << 2,
+  };
+  using SerializerFlags = base::Flags<SerializerFlag>;
+  V8_EXPORT_PRIVATE static constexpr SerializerFlags kDefaultSerializerFlags =
+      {};
+
+  // In preparation for serialization, clear data from the given isolate's heap
+  // that 1. can be reconstructed and 2. is not suitable for serialization. The
+  // `clear_recompilable_data` flag controls whether compiled objects are
+  // cleared from shared function infos and regexp objects.
+  V8_EXPORT_PRIVATE static void ClearReconstructableDataForSerialization(
+      Isolate* isolate, bool clear_recompilable_data);
+
+  // Serializes the given isolate and contexts. Each context may have an
+  // associated callback to serialize internal fields. The default context must
+  // be passed at index 0.
+  static v8::StartupData Create(
+      Isolate* isolate, std::vector<Context>* contexts,
+      const std::vector<SerializeInternalFieldsCallback>&
+          embedder_fields_serializers,
+      const SafepointScope& safepoint_scope,
+      const DisallowGarbageCollection& no_gc,
+      SerializerFlags flags = kDefaultSerializerFlags);
+
+  // ---------------- Deserialization -----------------------------------------
 
   // Initialize the Isolate from the internal snapshot. Returns false if no
   // snapshot could be found.
   static bool Initialize(Isolate* isolate);
 
-  // Create a new context using the internal partial snapshot.
+  // Create a new context using the internal context snapshot.
   static MaybeHandle<Context> NewContextFromSnapshot(
       Isolate* isolate, Handle<JSGlobalProxy> global_proxy,
       size_t context_index,
       v8::DeserializeEmbedderFieldsCallback embedder_fields_deserializer);
 
-  // ---------------- Helper methods ----------------
+  // ---------------- Testing -------------------------------------------------
+
+  // This function is used to stress the snapshot component. It serializes the
+  // current isolate and context into a snapshot, deserializes the snapshot into
+  // a new isolate and context, and finally runs VerifyHeap on the fresh
+  // isolate.
+  V8_EXPORT_PRIVATE static void SerializeDeserializeAndVerifyForTesting(
+      Isolate* isolate, Handle<Context> default_context);
+
+  // ---------------- Helper methods ------------------------------------------
 
   static bool HasContextSnapshot(Isolate* isolate, size_t index);
   static bool EmbedsScript(Isolate* isolate);
+  V8_EXPORT_PRIVATE static uint32_t GetExpectedChecksum(
+      const v8::StartupData* data);
+  V8_EXPORT_PRIVATE static uint32_t CalculateChecksum(
+      const v8::StartupData* data);
+  V8_EXPORT_PRIVATE static bool VerifyChecksum(const v8::StartupData* data);
+  static bool ExtractRehashability(const v8::StartupData* data);
+  V8_EXPORT_PRIVATE static uint32_t ExtractReadOnlySnapshotChecksum(
+      const v8::StartupData* data);
+  static bool VersionIsValid(const v8::StartupData* data);
 
   // To be implemented by the snapshot source.
   static const v8::StartupData* DefaultSnapshotBlob();
-
-  V8_EXPORT_PRIVATE static bool VerifyChecksum(const v8::StartupData* data);
-
-  // ---------------- Serialization ----------------
-
-  static v8::StartupData CreateSnapshotBlob(
-      const SnapshotData* startup_snapshot_in,
-      const SnapshotData* read_only_snapshot_in,
-      const std::vector<SnapshotData*>& context_snapshots_in,
-      bool can_be_rehashed);
+  static bool ShouldVerifyChecksum(const v8::StartupData* data);
 
 #ifdef DEBUG
   static bool SnapshotIsValid(const v8::StartupData* snapshot_blob);
 #endif  // DEBUG
-
-  static bool ExtractRehashability(const v8::StartupData* data);
-
- private:
-  static uint32_t ExtractNumContexts(const v8::StartupData* data);
-  static uint32_t ExtractContextOffset(const v8::StartupData* data,
-                                       uint32_t index);
-  static Vector<const byte> ExtractStartupData(const v8::StartupData* data);
-  static Vector<const byte> ExtractReadOnlyData(const v8::StartupData* data);
-  static Vector<const byte> ExtractContextData(const v8::StartupData* data,
-                                               uint32_t index);
-
-  static uint32_t GetHeaderValue(const v8::StartupData* data, uint32_t offset) {
-    return base::ReadLittleEndianValue<uint32_t>(
-        reinterpret_cast<Address>(data->data) + offset);
-  }
-  static void SetHeaderValue(char* data, uint32_t offset, uint32_t value) {
-    base::WriteLittleEndianValue(reinterpret_cast<Address>(data) + offset,
-                                 value);
-  }
-
-  static void CheckVersion(const v8::StartupData* data);
-
-  // Snapshot blob layout:
-  // [0] number of contexts N
-  // [1] rehashability
-  // [2] checksum
-  // [3] (128 bytes) version string
-  // [4] offset to readonly
-  // [5] offset to context 0
-  // [6] offset to context 1
-  // ...
-  // ... offset to context N - 1
-  // ... startup snapshot data
-  // ... read-only snapshot data
-  // ... context 0 snapshot data
-  // ... context 1 snapshot data
-
-  static const uint32_t kNumberOfContextsOffset = 0;
-  // TODO(yangguo): generalize rehashing, and remove this flag.
-  static const uint32_t kRehashabilityOffset =
-      kNumberOfContextsOffset + kUInt32Size;
-  static const uint32_t kChecksumOffset = kRehashabilityOffset + kUInt32Size;
-  static const uint32_t kVersionStringOffset = kChecksumOffset + kUInt32Size;
-  static const uint32_t kVersionStringLength = 64;
-  static const uint32_t kReadOnlyOffsetOffset =
-      kVersionStringOffset + kVersionStringLength;
-  static const uint32_t kFirstContextOffsetOffset =
-      kReadOnlyOffsetOffset + kUInt32Size;
-
-  static Vector<const byte> ChecksummedContent(const v8::StartupData* data) {
-    STATIC_ASSERT(kVersionStringOffset == kChecksumOffset + kUInt32Size);
-    const uint32_t kChecksumStart = kVersionStringOffset;
-    return Vector<const byte>(
-        reinterpret_cast<const byte*>(data->data + kChecksumStart),
-        data->raw_size - kChecksumStart);
-  }
-
-  static uint32_t StartupSnapshotOffset(int num_contexts) {
-    return POINTER_SIZE_ALIGN(kFirstContextOffsetOffset +
-                              num_contexts * kInt32Size);
-  }
-
-  static uint32_t ContextSnapshotOffsetOffset(int index) {
-    return kFirstContextOffsetOffset + index * kInt32Size;
-  }
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(Snapshot);
 };
 
 // Convenience wrapper around snapshot data blob creation used e.g. by tests and
 // mksnapshot.
 V8_EXPORT_PRIVATE v8::StartupData CreateSnapshotDataBlobInternal(
     v8::SnapshotCreator::FunctionCodeHandling function_code_handling,
-    const char* embedded_source, v8::Isolate* isolate = nullptr);
+    const char* embedded_source = nullptr, Isolate* isolate = nullptr,
+    Snapshot::SerializerFlags serializer_flags =
+        Snapshot::kDefaultSerializerFlags);
+// .. and for inspector-test.cc which needs an extern declaration due to
+// restrictive include rules:
+V8_EXPORT_PRIVATE v8::StartupData
+CreateSnapshotDataBlobInternalForInspectorTest(
+    v8::SnapshotCreator::FunctionCodeHandling function_code_handling,
+    const char* embedded_source);
 
 // Convenience wrapper around snapshot data blob warmup used e.g. by tests and
 // mksnapshot.
@@ -179,6 +140,50 @@ V8_EXPORT_PRIVATE v8::StartupData WarmUpSnapshotDataBlobInternal(
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
 void SetSnapshotFromFile(StartupData* snapshot_blob);
 #endif
+
+// The implementation of the API-exposed class SnapshotCreator.
+class SnapshotCreatorImpl final {
+ public:
+  SnapshotCreatorImpl(Isolate* isolate, const intptr_t* api_external_references,
+                      const StartupData* existing_blob, bool owns_isolate);
+  ~SnapshotCreatorImpl();
+
+  Isolate* isolate() const { return isolate_; }
+
+  void SetDefaultContext(Handle<NativeContext> context,
+                         SerializeInternalFieldsCallback callback);
+  size_t AddContext(Handle<NativeContext> context,
+                    SerializeInternalFieldsCallback callback);
+
+  size_t AddData(Handle<NativeContext> context, Address object);
+  size_t AddData(Address object);
+
+  StartupData CreateBlob(
+      SnapshotCreator::FunctionCodeHandling function_code_handling,
+      Snapshot::SerializerFlags serializer_flags =
+          Snapshot::kDefaultSerializerFlags);
+
+  static constexpr size_t kDefaultContextIndex = 0;
+  static constexpr size_t kFirstAddtlContextIndex = kDefaultContextIndex + 1;
+
+ private:
+  struct SerializableContext {
+    SerializableContext() : handle_location(nullptr), callback(nullptr) {}
+    SerializableContext(Address* handle_location,
+                        SerializeInternalFieldsCallback callback)
+        : handle_location(handle_location), callback(callback) {}
+    Address* handle_location = nullptr;  // A GlobalHandle.
+    SerializeInternalFieldsCallback callback;
+  };
+
+  Handle<NativeContext> context_at(size_t i) const;
+  bool created() const { return contexts_.size() == 0; }
+
+  const bool owns_isolate_;
+  Isolate* const isolate_;
+  v8::ArrayBuffer::Allocator* const array_buffer_allocator_;
+  std::vector<SerializableContext> contexts_;
+};
 
 }  // namespace internal
 }  // namespace v8

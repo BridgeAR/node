@@ -22,8 +22,7 @@
 'use strict';
 const common = require('../common');
 const assert = require('assert');
-const PassThrough = require('_stream_passthrough');
-const Transform = require('_stream_transform');
+const { PassThrough, Transform } = require('stream');
 
 {
   // Verify writable side consumption
@@ -406,7 +405,7 @@ const Transform = require('_stream_transform');
     { foo: 'bar' },
     100,
     'string',
-    { nested: { things: [ { foo: 'bar' }, 100, 'string' ] } }
+    { nested: { things: [ { foo: 'bar' }, 100, 'string' ] } },
   ];
 
   let ended = false;
@@ -447,7 +446,7 @@ const Transform = require('_stream_transform');
     { foo: 'bar' },
     100,
     'string',
-    { nested: { things: [ { foo: 'bar' }, 100, 'string' ] } }
+    { nested: { things: [ { foo: 'bar' }, 100, 'string' ] } },
   ];
 
   let ended = false;
@@ -468,4 +467,28 @@ const Transform = require('_stream_transform');
   process.nextTick(common.mustCall(function() {
     assert.strictEqual(ended, true);
   }));
+}
+
+{
+  const s = new Transform({
+    objectMode: true,
+    construct(callback) {
+      this.push('header from constructor');
+      callback();
+    },
+    transform: (row, encoding, callback) => {
+      callback(null, row);
+    },
+  });
+
+  const expected = [
+    'header from constructor',
+    'firstLine',
+    'secondLine',
+  ];
+  s.on('data', common.mustCall((data) => {
+    assert.strictEqual(data.toString(), expected.shift());
+  }, 3));
+  s.write('firstLine');
+  process.nextTick(() => s.write('secondLine'));
 }

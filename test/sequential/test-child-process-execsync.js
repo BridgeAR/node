@@ -21,13 +21,22 @@
 
 'use strict';
 const common = require('../common');
+const tmpdir = require('../common/tmpdir');
+tmpdir.refresh();
+
 const assert = require('assert');
 
 const { execFileSync, execSync, spawnSync } = require('child_process');
 const { getSystemErrorName } = require('util');
 
 const TIMER = 200;
-const SLEEP = 2000;
+let SLEEP = 2000;
+if (common.isWindows) {
+  // Some of the windows machines in the CI need more time to launch
+  // and receive output from child processes.
+  // https://github.com/nodejs/build/issues/3014
+  SLEEP = 10000;
+}
 
 const execOpts = { encoding: 'utf8', shell: true };
 
@@ -57,7 +66,7 @@ try {
   assert.ok(caught, 'execSync should throw');
   const end = Date.now() - start;
   assert(end < SLEEP);
-  assert(err.status > 128 || err.signal);
+  assert(err.status > 128 || err.signal, `status: ${err.status}, signal: ${err.signal}`);
 }
 
 assert.throws(function() {
@@ -84,7 +93,7 @@ const cmd = `"${process.execPath}" -e "console.log('${msg}');"`;
 
 const args = [
   '-e',
-  `console.log("${msg}");`
+  `console.log("${msg}");`,
 ];
 {
   const ret = execFileSync(process.execPath, args);
@@ -99,7 +108,7 @@ const args = [
 // Verify that the cwd option works.
 // See https://github.com/nodejs/node-v0.x-archive/issues/7824.
 {
-  const cwd = common.rootDir;
+  const cwd = tmpdir.path;
   const cmd = common.isWindows ? 'echo %cd%' : 'pwd';
   const response = execSync(cmd, { cwd });
 
@@ -125,7 +134,7 @@ const args = [
     'signal',
     'status',
     'stderr',
-    'stdout'
+    'stdout',
   ]);
 
   assert.throws(() => {

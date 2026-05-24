@@ -16,14 +16,13 @@ let fileData;
 
 assert(fs.existsSync(loc));
 
-fs.readFile(loc, common.mustCall((err, data) => {
-  assert.ifError(err);
+fs.readFile(loc, common.mustSucceed((data) => {
   fileData = data;
 
   const server = http2.createServer();
   let client;
 
-  const countdown = new Countdown(3, () => {
+  const countdown = new Countdown(2, () => {
     server.close();
     client.close();
   });
@@ -51,7 +50,6 @@ fs.readFile(loc, common.mustCall((err, data) => {
     req.resume();
     req.on('end', common.mustCall());
 
-    req.on('finish', () => countdown.dec());
     const str = fs.createReadStream(loc);
     str.on('end', common.mustCall());
     str.on('close', () => countdown.dec());

@@ -18,12 +18,14 @@ namespace internal {
 // Cleared at startup and prior to any gc.
 class DescriptorLookupCache {
  public:
+  DescriptorLookupCache(const DescriptorLookupCache&) = delete;
+  DescriptorLookupCache& operator=(const DescriptorLookupCache&) = delete;
   // Lookup descriptor index for (map, name).
   // If absent, kAbsent is returned.
-  inline int Lookup(Map source, Name name);
+  inline int Lookup(Tagged<Map> source, Tagged<Name> name);
 
   // Update an element in the cache.
-  inline void Update(Map source, Name name, int result);
+  inline void Update(Tagged<Map> source, Tagged<Name> name, int result);
 
   // Clear the cache.
   void Clear();
@@ -39,7 +41,7 @@ class DescriptorLookupCache {
     }
   }
 
-  static inline int Hash(Map source, Name name);
+  static inline int Hash(Tagged<Map> source, Tagged<Name> name);
 
   static const int kLength = 64;
   struct Key {
@@ -51,7 +53,6 @@ class DescriptorLookupCache {
   int results_[kLength];
 
   friend class Isolate;
-  DISALLOW_COPY_AND_ASSIGN(DescriptorLookupCache);
 };
 
 }  // namespace internal

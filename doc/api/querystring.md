@@ -1,4 +1,4 @@
-# Query String
+# Query string
 
 <!--introduced_in=v0.1.25-->
 
@@ -6,14 +6,21 @@
 
 <!--name=querystring-->
 
-The `querystring` module provides utilities for parsing and formatting URL
+<!-- source_link=lib/querystring.js -->
+
+The `node:querystring` module provides utilities for parsing and formatting URL
 query strings. It can be accessed using:
 
 ```js
-const querystring = require('querystring');
+const querystring = require('node:querystring');
 ```
 
+`querystring` is more performant than {URLSearchParams} but is not a
+standardized API. Use {URLSearchParams} when performance is not critical or
+when compatibility with browser code is desirable.
+
 ## `querystring.decode()`
+
 <!-- YAML
 added: v0.1.99
 -->
@@ -21,6 +28,7 @@ added: v0.1.99
 The `querystring.decode()` function is an alias for `querystring.parse()`.
 
 ## `querystring.encode()`
+
 <!-- YAML
 added: v0.1.99
 -->
@@ -28,6 +36,7 @@ added: v0.1.99
 The `querystring.encode()` function is an alias for `querystring.stringify()`.
 
 ## `querystring.escape(str)`
+
 <!-- YAML
 added: v0.1.25
 -->
@@ -44,6 +53,7 @@ application code to provide a replacement percent-encoding implementation if
 necessary by assigning `querystring.escape` to an alternative function.
 
 ## `querystring.parse(str[, sep[, eq[, options]]])`
+
 <!-- YAML
 added: v0.1.25
 changes:
@@ -53,7 +63,9 @@ changes:
   - version: v6.0.0
     pr-url: https://github.com/nodejs/node/pull/6055
     description: The returned object no longer inherits from `Object.prototype`.
-  - version: v6.0.0, v4.2.4
+  - version:
+    - v6.0.0
+    - v4.2.4
     pr-url: https://github.com/nodejs/node/pull/3807
     description: The `eq` parameter may now have a length of more than `1`.
 -->
@@ -75,18 +87,17 @@ collection of key and value pairs.
 
 For example, the query string `'foo=bar&abc=xyz&abc=123'` is parsed into:
 
-<!-- eslint-skip -->
-```js
+```json
 {
-  foo: 'bar',
-  abc: ['xyz', '123']
+  "foo": "bar",
+  "abc": ["xyz", "123"]
 }
 ```
 
 The object returned by the `querystring.parse()` method _does not_
 prototypically inherit from the JavaScript `Object`. This means that typical
 `Object` methods such as `obj.toString()`, `obj.hasOwnProperty()`, and others
-are not defined and *will not work*.
+are not defined and _will not work_.
 
 By default, percent-encoded characters within the query string will be assumed
 to use UTF-8 encoding. If an alternative character encoding is used, then an
@@ -100,6 +111,7 @@ querystring.parse('w=%D6%D0%CE%C4&foo=bar', null, null,
 ```
 
 ## `querystring.stringify(obj[, sep[, eq[, options]]])`
+
 <!-- YAML
 added: v0.1.25
 -->
@@ -118,8 +130,9 @@ The `querystring.stringify()` method produces a URL query string from a
 given `obj` by iterating through the object's "own properties".
 
 It serializes the following types of values passed in `obj`:
-{string|number|boolean|string[]|number[]|boolean[]}
-Any other input values will be coerced to empty strings.
+{string|number|bigint|boolean|string\[]|number\[]|bigint\[]|boolean\[]}
+The numeric values must be finite. Any other input values will be coerced to
+empty strings.
 
 ```js
 querystring.stringify({ foo: 'bar', baz: ['qux', 'quux'], corge: '' });
@@ -141,6 +154,7 @@ querystring.stringify({ w: '中文', foo: 'bar' }, null, null,
 ```
 
 ## `querystring.unescape(str)`
+
 <!-- YAML
 added: v0.1.25
 -->

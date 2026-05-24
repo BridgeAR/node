@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 #include "src/debug/wasm/gdb-server/gdb-server-thread.h"
+
 #include "src/debug/wasm/gdb-server/gdb-server.h"
 #include "src/debug/wasm/gdb-server/session.h"
+#include "src/flags/flags.h"
 
 namespace v8 {
 namespace internal {
@@ -32,7 +34,7 @@ bool GdbServerThread::StartAndInitialize() {
   // this operation happensat most once per process and only when the
   // --wasm-gdb-remote flag is set.
   start_semaphore_.Wait();
-  return true;
+  return !!target_;
 }
 
 void GdbServerThread::CleanupThread() {
@@ -60,7 +62,8 @@ void GdbServerThread::Run() {
 #endif
 
   // If the default port is not available, try any port.
-  SocketBinding socket_binding = SocketBinding::Bind(FLAG_wasm_gdb_remote_port);
+  SocketBinding socket_binding =
+      SocketBinding::Bind(v8_flags.wasm_gdb_remote_port);
   if (!socket_binding.IsValid()) {
     socket_binding = SocketBinding::Bind(0);
   }

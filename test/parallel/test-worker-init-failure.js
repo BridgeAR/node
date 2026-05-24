@@ -10,6 +10,10 @@ if (common.isWindows) {
   common.skip('ulimit does not work on Windows.');
 }
 
+if (process.config.variables.node_builtin_modules_path) {
+  common.skip('this test cannot pass when Node.js is built with --node-builtin-modules-path');
+}
+
 // A reasonably low fd count. An empty node process
 // creates around 30 fds for its internal purposes,
 // so making it too low will crash the process early,
@@ -30,13 +34,14 @@ if (process.argv[2] === 'child') {
     });
 
     // We want to test that if there is an error in a constrained running
-    // environment, it will be one of `EMFILE` or `ERR_WORKER_INIT_FAILED`.
+    // environment, it will be one of `ENFILE`, `EMFILE`, 'ENOENT', or
+    // `ERR_WORKER_INIT_FAILED`.
+    const expected = ['ERR_WORKER_INIT_FAILED', 'EMFILE', 'ENFILE', 'ENOENT'];
+
     // `common.mustCall*` cannot be used here as in some environments
     // (i.e. single cpu) `ulimit` may not lead to such an error.
-
     worker.on('error', (e) => {
-      assert.match(e.message, /EMFILE/);
-      assert.ok(e.code === 'ERR_WORKER_INIT_FAILED' || e.code === 'EMFILE');
+      assert.ok(expected.includes(e.code), `${e.code} not expected`);
     });
   }
 

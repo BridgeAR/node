@@ -23,7 +23,6 @@
 const common = require('../common');
 const ArrayStream = require('../common/arraystream');
 const assert = require('assert');
-const join = require('path').join;
 const fs = require('fs');
 
 const tmpdir = require('../common/tmpdir');
@@ -46,9 +45,9 @@ testMe._domain.on('error', function(reason) {
 const testFile = [
   'let inner = (function() {',
   '  return {one:1};',
-  '})()'
+  '})()',
 ];
-const saveFileName = join(tmpdir.path, 'test.save.js');
+const saveFileName = tmpdir.resolve('test.save.js');
 
 // Add some data.
 putIn.run(testFile);
@@ -61,27 +60,30 @@ assert.strictEqual(fs.readFileSync(saveFileName, 'utf8'),
                    testFile.join('\n'));
 
 // Make sure that the REPL data is "correct".
-testMe.complete('inner.o', common.mustCall(function(error, data) {
-  assert.ifError(error);
+testMe.complete('inner.o', common.mustSucceed((data) => {
   assert.deepStrictEqual(data, works);
 }));
 
 // Clear the REPL.
 putIn.run(['.clear']);
 
+testMe._sawKeyPress = true;
 // Load the file back in.
 putIn.run([`.load ${saveFileName}`]);
 
+// Make sure loading doesn't insert extra indentation
+// https://github.com/nodejs/node/issues/47673
+assert.strictEqual(testMe.line, '');
+
 // Make sure that the REPL data is "correct".
-testMe.complete('inner.o', common.mustCall(function(error, data) {
-  assert.ifError(error);
+testMe.complete('inner.o', common.mustSucceed((data) => {
   assert.deepStrictEqual(data, works);
 }));
 
 // Clear the REPL.
 putIn.run(['.clear']);
 
-let loadFile = join(tmpdir.path, 'file.does.not.exist');
+let loadFile = tmpdir.resolve('file.does.not.exist');
 
 // Should not break.
 putIn.write = common.mustCall(function(data) {
@@ -105,7 +107,7 @@ putIn.run(['.clear']);
 
 // NUL (\0) is disallowed in filenames in UNIX-like operating systems and
 // Windows so we can use that to test failed saves.
-const invalidFileName = join(tmpdir.path, '\0\0\0\0\0');
+const invalidFileName = tmpdir.resolve('\0\0\0\0\0');
 
 // Should not break.
 putIn.write = common.mustCall(function(data) {
@@ -123,7 +125,7 @@ putIn.run([`.save ${invalidFileName}`]);
   const cmds = [
     'function testSave() {',
     'return "saved";',
-    '}'
+    '}',
   ];
   const putIn = new ArrayStream();
   const replServer = repl.start({ terminal: true, stream: putIn });

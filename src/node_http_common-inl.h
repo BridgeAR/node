@@ -31,8 +31,7 @@ NgHeaders<T>::NgHeaders(Environment* env, v8::Local<v8::Array> headers) {
                                  count_ * sizeof(nv_t) +
                                  header_string_len);
 
-  char* start = reinterpret_cast<char*>(
-      RoundUp(reinterpret_cast<uintptr_t>(*buf_), alignof(nv_t)));
+  char* start = AlignUp(buf_.out(), alignof(nv_t));
   char* header_contents = start + (count_ * sizeof(nv_t));
   nv_t* const nva = reinterpret_cast<nv_t*>(start);
 
@@ -56,13 +55,14 @@ NgHeaders<T>::NgHeaders(Environment* env, v8::Local<v8::Array> headers) {
       return;
     }
 
-    nva[n].flags = T::kNoneFlag;
     nva[n].name = reinterpret_cast<uint8_t*>(p);
     nva[n].namelen = strlen(p);
     p += nva[n].namelen + 1;
     nva[n].value = reinterpret_cast<uint8_t*>(p);
     nva[n].valuelen = strlen(p);
     p += nva[n].valuelen + 1;
+    nva[n].flags = *p;
+    p++;
   }
 }
 
@@ -131,7 +131,8 @@ NgHeader<T>::NgHeader(
 
 template <typename T>
 NgHeader<T>::NgHeader(NgHeader<T>&& other) noexcept
-    : name_(std::move(other.name_)),
+    : env_(other.env_),
+      name_(std::move(other.name_)),
       value_(std::move(other.value_)),
       token_(other.token_),
       flags_(other.flags_) {
@@ -188,6 +189,11 @@ std::string NgHeader<T>::value() const {
 template <typename T>
 size_t NgHeader<T>::length() const {
   return name_.len() + value_.len();
+}
+
+template <typename T>
+uint8_t NgHeader<T>::flags() const {
+  return flags_;
 }
 
 }  // namespace node

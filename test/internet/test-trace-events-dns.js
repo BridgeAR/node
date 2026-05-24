@@ -2,7 +2,6 @@
 const common = require('../common');
 const assert = require('assert');
 const cp = require('child_process');
-const path = require('path');
 const tmpdir = require('../common/tmpdir');
 const fs = require('fs');
 const util = require('util');
@@ -29,6 +28,7 @@ const tests = {
   'resolveAny': 'dns.resolveAny("example.com", (err, res) => {});',
   'resolve4': 'dns.resolve4("example.com", (err, res) => {});',
   'resolve6': 'dns.resolve6("example.com", (err, res) => {});',
+  'resolveCaa': 'dns.resolveCaa("example.com", (err, res) => {});',
   'resolveCname': 'dns.resolveCname("example.com", (err, res) => {});',
   'resolveMx': 'dns.resolveMx("example.com", (err, res) => {});',
   'resolveNs': 'dns.resolveNs("example.com", (err, res) => {});',
@@ -36,7 +36,7 @@ const tests = {
   'resolveSrv': 'dns.resolveSrv("example.com", (err, res) => {});',
   'resolvePtr': 'dns.resolvePtr("example.com", (err, res) => {});',
   'resolveNaptr': 'dns.resolveNaptr("example.com", (err, res) => {});',
-  'resolveSoa': 'dns.resolveSoa("example.com", (err, res) => {});'
+  'resolveSoa': 'dns.resolveSoa("example.com", (err, res) => {});',
 };
 
 for (const tr in tests) {
@@ -44,7 +44,7 @@ for (const tr in tests) {
                             [ '--trace-event-categories',
                               'node.dns.native',
                               '-e',
-                              test_str + tests[tr]
+                              test_str + tests[tr],
                             ],
                             { encoding: 'utf8' });
 
@@ -56,7 +56,7 @@ for (const tr in tests) {
     throw new Error(`${tr}:\n${util.inspect(proc)}`);
   }
 
-  const file = path.join(tmpdir.path, traceFile);
+  const file = tmpdir.resolve(traceFile);
 
   const data = fs.readFileSync(file);
   const traces = JSON.parse(data.toString()).traceEvents

@@ -1,13 +1,6 @@
-#if (__GNUC__ >= 8) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-#include "v8.h"
-#if (__GNUC__ >= 8) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-#include "aliased_buffer.h"
+#include "aliased_buffer-inl.h"
 #include "node_test_fixture.h"
+#include "v8.h"
 
 using node::AliasedBufferBase;
 

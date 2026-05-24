@@ -7,13 +7,14 @@
 
 #include <stdint.h>
 
-#include "include/cppgc/gc-info.h"
+#include "include/cppgc/internal/gc-info.h"
 #include "include/cppgc/platform.h"
 #include "include/v8config.h"
 #include "src/base/logging.h"
 #include "src/base/macros.h"
 #include "src/base/platform/mutex.h"
 #include "src/base/platform/platform.h"
+#include "src/heap/cppgc/platform.h"
 
 namespace cppgc {
 namespace internal {
@@ -21,8 +22,14 @@ namespace internal {
 // GCInfo contains metadata for objects that are instantiated from classes that
 // inherit from GarbageCollected.
 struct GCInfo final {
+  constexpr GCInfo(FinalizationCallback finalize, TraceCallback trace,
+                   NameCallback name)
+      : finalize(finalize), trace(trace), name(name) {}
+
   FinalizationCallback finalize;
-  bool has_v_table;
+  TraceCallback trace;
+  NameCallback name;
+  size_t padding = 0;
 };
 
 class V8_EXPORT GCInfoTable final {
@@ -47,10 +54,13 @@ class V8_EXPORT GCInfoTable final {
 
   // Refer through GlobalGCInfoTable for retrieving the global table outside
   // of testing code.
-  explicit GCInfoTable(PageAllocator* page_allocator);
+  GCInfoTable(PageAllocator& page_allocator,
+              FatalOutOfMemoryHandler& oom_handler);
   ~GCInfoTable();
+  GCInfoTable(const GCInfoTable&) = delete;
+  GCInfoTable& operator=(const GCInfoTable&) = delete;
 
-  GCInfoIndex RegisterNewGCInfo(const GCInfo& info);
+  GCInfoIndex RegisterNewGCInfo(std::atomic<uint16_t>&, const GCInfo& info);
 
   const GCInfo& GCInfoFromIndex(GCInfoIndex index) const {
     DCHECK_GE(index, kMinIndex);
@@ -59,9 +69,12 @@ class V8_EXPORT GCInfoTable final {
     return table_[index];
   }
 
-  GCInfoIndex NumberOfGCInfosForTesting() const { return current_index_; }
+  GCInfoIndex NumberOfGCInfos() const { return current_index_; }
+
   GCInfoIndex LimitForTesting() const { return limit_; }
   GCInfo& TableSlotForTesting(GCInfoIndex index) { return table_[index]; }
+
+  PageAllocator& allocator() const { return page_allocator_; }
 
  private:
   void Resize();
@@ -71,7 +84,8 @@ class V8_EXPORT GCInfoTable final {
 
   void CheckMemoryIsZeroed(uintptr_t* base, size_t len);
 
-  PageAllocator* page_allocator_;
+  PageAllocator& page_allocator_;
+  FatalOutOfMemoryHandler& oom_handler_;
   // Holds the per-class GCInfo descriptors; each HeapObjectHeader keeps an
   // index into this table.
   GCInfo* table_;
@@ -82,14 +96,17 @@ class V8_EXPORT GCInfoTable final {
   GCInfoIndex limit_ = 0;
 
   v8::base::Mutex table_mutex_;
-
-  DISALLOW_COPY_AND_ASSIGN(GCInfoTable);
 };
 
 class V8_EXPORT GlobalGCInfoTable final {
  public:
-  // Sets up a singleton table that can be acquired using Get().
-  static void Create(PageAllocator* page_allocator);
+  GlobalGCInfoTable(const GlobalGCInfoTable&) = delete;
+  GlobalGCInfoTable& operator=(const GlobalGCInfoTable&) = delete;
+
+  // Sets up the table with the provided `page_allocator`. Will use an internal
+  // allocator in case no PageAllocator is provided. May be called multiple
+  // times with the same `page_allocator` argument.
+  static void Initialize(PageAllocator& page_allocator);
 
   // Accessors for the singleton table.
   static GCInfoTable& GetMutable() { return *global_table_; }
@@ -104,7 +121,6 @@ class V8_EXPORT GlobalGCInfoTable final {
   static GCInfoTable* global_table_;
 
   DISALLOW_NEW_AND_DELETE()
-  DISALLOW_COPY_AND_ASSIGN(GlobalGCInfoTable);
 };
 
 }  // namespace internal

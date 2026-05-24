@@ -30,6 +30,7 @@ uint32_t BuiltinsConstantsTableBuilder::AddObject(Handle<Object> object) {
   // accessibly from the root list.
   RootIndex root_list_index;
   DCHECK(!isolate_->roots_table().IsRootHandle(object, &root_list_index));
+  DCHECK_IMPLIES(IsMap(*object), !HeapObject::cast(*object).InReadOnlySpace());
 
   // Not yet finalized.
   DCHECK_EQ(ReadOnlyRoots(isolate_).empty_fixed_array(),
@@ -43,43 +44,57 @@ uint32_t BuiltinsConstantsTableBuilder::AddObject(Handle<Object> object) {
 
   // All code objects should be loaded through the root register or use
   // pc-relative addressing.
-  DCHECK(!object->IsCode());
+  DCHECK(!IsInstructionStream(*object));
 #endif
 
-  uint32_t* maybe_key = map_.Find(object);
-  if (maybe_key == nullptr) {
-    DCHECK(object->IsHeapObject());
-    uint32_t index = map_.size();
-    map_.Set(object, index);
-    return index;
-  } else {
-    return *maybe_key;
+  auto find_result = map_.FindOrInsert(object);
+  if (!find_result.already_exists) {
+    DCHECK(IsHeapObject(*object));
+    *find_result.entry = map_.size() - 1;
   }
+  return *find_result.entry;
 }
 
-void BuiltinsConstantsTableBuilder::PatchSelfReference(
-    Handle<Object> self_reference, Handle<Code> code_object) {
-#ifdef DEBUG
+namespace {
+void CheckPreconditionsForPatching(Isolate* isolate,
+                                   Handle<Object> replacement_object) {
   // Roots must not be inserted into the constants table as they are already
-  // accessibly from the root list.
+  // accessible from the root list.
   RootIndex root_list_index;
-  DCHECK(!isolate_->roots_table().IsRootHandle(code_object, &root_list_index));
+  DCHECK(!isolate->roots_table().IsRootHandle(replacement_object,
+                                              &root_list_index));
+  USE(root_list_index);
 
   // Not yet finalized.
-  DCHECK_EQ(ReadOnlyRoots(isolate_).empty_fixed_array(),
-            isolate_->heap()->builtins_constants_table());
+  DCHECK_EQ(ReadOnlyRoots(isolate).empty_fixed_array(),
+            isolate->heap()->builtins_constants_table());
 
-  DCHECK(isolate_->IsGeneratingEmbeddedBuiltins());
+  DCHECK(isolate->IsGeneratingEmbeddedBuiltins());
+}
+}  // namespace
 
-  DCHECK(self_reference->IsOddball());
-  DCHECK(Oddball::cast(*self_reference).kind() ==
+void BuiltinsConstantsTableBuilder::PatchSelfReference(
+    Handle<Object> self_reference, Handle<InstructionStream> code_object) {
+  CheckPreconditionsForPatching(isolate_, code_object);
+  DCHECK(IsOddball(*self_reference));
+  DCHECK(Oddball::cast(*self_reference)->kind() ==
          Oddball::kSelfReferenceMarker);
-#endif
 
   uint32_t key;
   if (map_.Delete(self_reference, &key)) {
-    DCHECK(code_object->IsCode());
-    map_.Set(code_object, key);
+    DCHECK(IsInstructionStream(*code_object));
+    map_.Insert(code_object, key);
+  }
+}
+
+void BuiltinsConstantsTableBuilder::PatchBasicBlockCountersReference(
+    Handle<ByteArray> counters) {
+  CheckPreconditionsForPatching(isolate_, counters);
+
+  uint32_t key;
+  if (map_.Delete(ReadOnlyRoots(isolate_).basic_block_counters_marker(),
+                  &key)) {
+    map_.Insert(counters, key);
   }
 }
 
@@ -100,23 +115,25 @@ void BuiltinsConstantsTableBuilder::Finalize() {
   ConstantsMap::IteratableScope it_scope(&map_);
   for (auto it = it_scope.begin(); it != it_scope.end(); ++it) {
     uint32_t index = *it.entry();
-    Object value = it.key();
-    if (value.IsCode() && Code::cast(value).kind() == Code::BUILTIN) {
+    Tagged<Object> value = it.key();
+    if (IsCode(value) && Code::cast(value)->kind() == CodeKind::BUILTIN) {
       // Replace placeholder code objects with the real builtin.
       // See also: SetupIsolateDelegate::PopulateWithPlaceholders.
       // TODO(jgruber): Deduplicate placeholders and their corresponding
       // builtin.
-      value = builtins->builtin(Code::cast(value).builtin_index());
+      value = builtins->code(Code::cast(value)->builtin_id());
     }
-    DCHECK(value.IsHeapObject());
+    DCHECK(IsHeapObject(value));
     table->set(index, value);
   }
 
 #ifdef DEBUG
   for (int i = 0; i < map_.size(); i++) {
-    DCHECK(table->get(i).IsHeapObject());
+    DCHECK(IsHeapObject(table->get(i)));
     DCHECK_NE(ReadOnlyRoots(isolate_).undefined_value(), table->get(i));
     DCHECK_NE(ReadOnlyRoots(isolate_).self_reference_marker(), table->get(i));
+    DCHECK_NE(ReadOnlyRoots(isolate_).basic_block_counters_marker(),
+              table->get(i));
   }
 #endif
 

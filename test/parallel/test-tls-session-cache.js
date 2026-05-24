@@ -50,6 +50,7 @@ function doTest(testOptions, callback) {
     requestCert: true,
     rejectUnauthorized: false,
     secureProtocol: 'TLS_method',
+    ciphers: 'RSA@SECLEVEL=0'
   };
   let requestCount = 0;
   let resumeCount = 0;
@@ -99,11 +100,12 @@ function doTest(testOptions, callback) {
     const args = [
       's_client',
       '-tls1',
+      '-cipher', (common.hasOpenSSL31 ? 'DEFAULT:@SECLEVEL=0' : 'DEFAULT'),
       '-connect', `localhost:${this.address().port}`,
       '-servername', 'ohgod',
       '-key', fixtures.path('keys/rsa_private.pem'),
       '-cert', fixtures.path('keys/rsa_cert.crt'),
-      '-reconnect'
+      '-reconnect',
     ].concat(testOptions.tickets ? [] : '-no_ticket');
 
     function spawnClient() {

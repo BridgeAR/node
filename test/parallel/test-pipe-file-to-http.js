@@ -24,12 +24,11 @@ const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
 const http = require('http');
-const path = require('path');
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
-const filename = path.join(tmpdir.path, 'big');
+const filename = tmpdir.resolve('big');
 let count = 0;
 
 const server = http.createServer((req, res) => {
@@ -69,9 +68,7 @@ function makeRequest() {
 
   const s = fs.ReadStream(filename);
   s.pipe(req);
-  s.on('close', common.mustCall((err) => {
-    assert.ifError(err);
-  }));
+  s.on('close', common.mustSucceed());
 
   req.on('response', (res) => {
     res.resume();

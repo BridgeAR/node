@@ -20,10 +20,9 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-/*
- * Repeated requests for a domain that fails to resolve
- * should trigger the error event after each attempt.
- */
+
+// Repeated requests for a domain that fails to resolve
+// should trigger the error event after each attempt.
 
 const common = require('../common');
 const assert = require('assert');
@@ -36,7 +35,7 @@ function httpreq(count) {
     host: 'not-a-real-domain-name.nobody-would-register-this-as-a-tld',
     port: 80,
     path: '/',
-    method: 'GET'
+    method: 'GET',
   }, common.mustNotCall());
 
   req.on('error', common.mustCall((e) => {

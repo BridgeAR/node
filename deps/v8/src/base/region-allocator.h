@@ -27,10 +27,44 @@ class V8_BASE_EXPORT RegionAllocator final {
  public:
   using Address = uintptr_t;
 
+  using SplitMergeCallback = std::function<void(Address start, size_t size)>;
+
   static constexpr Address kAllocationFailure = static_cast<Address>(-1);
 
+  enum class RegionState {
+    // The region can be allocated from.
+    kFree,
+    // The region has been carved out of the wider area and is not allocatable.
+    kExcluded,
+    // The region has been allocated and is managed by a RegionAllocator.
+    kAllocated,
+  };
+
   RegionAllocator(Address address, size_t size, size_t page_size);
+  RegionAllocator(const RegionAllocator&) = delete;
+  RegionAllocator& operator=(const RegionAllocator&) = delete;
   ~RegionAllocator();
+
+  // Split and merge callbacks.
+  //
+  // These callbacks can be installed to perform additional logic when regions
+  // are split or merged. For example, when managing Windows placeholder
+  // regions, a region must be split into sub-regions (using
+  // VirtualFree(MEM_PRESERVE_PLACEHOLDER)) before a part of it can be replaced
+  // with an actual memory mapping. Similarly, multiple sub-regions must be
+  // merged (using VirtualFree(MEM_COALESCE_PLACEHOLDERS)) when coalescing them
+  // into a larger, free region again.
+  //
+  // The on_split callback is called to signal that an existing region is split
+  // so that [start, start+size) becomes a new region.
+  void set_on_split_callback(SplitMergeCallback callback) {
+    on_split_ = callback;
+  }
+  // The on_merge callback is called to signal that all regions in the range
+  // [start, start+size) are merged into a single one.
+  void set_on_merge_callback(SplitMergeCallback callback) {
+    on_merge_ = callback;
+  }
 
   // Allocates region of |size| (must be |page_size|-aligned). Returns
   // the address of the region on success or kAllocationFailure.
@@ -43,7 +77,22 @@ class V8_BASE_EXPORT RegionAllocator final {
   // true.
   // This kind of allocation is supposed to be used during setup phase to mark
   // certain regions as used or for randomizing regions displacement.
-  bool AllocateRegionAt(Address requested_address, size_t size);
+  // By default regions are marked as used, but can also be allocated as
+  // RegionState::kExcluded to prevent the RegionAllocator from using that
+  // memory range, which is useful when reserving any area to remap shared
+  // memory into.
+  bool AllocateRegionAt(Address requested_address, size_t size,
+                        RegionState region_state = RegionState::kAllocated);
+
+  // Allocates a region of |size| aligned to |alignment|. The size and alignment
+  // must be a multiple of |page_size|. Returns the address of the region on
+  // success or kAllocationFailure.
+  Address AllocateAlignedRegion(size_t size, size_t alignment);
+
+  // Attempts to allocate a region of the given size and alignment at the
+  // specified address but fall back to allocating the region elsewhere if
+  // necessary.
+  Address AllocateRegion(Address hint, size_t size, size_t alignment);
 
   // Frees region at given |address|, returns the size of the region.
   // There must be a used region starting at given address otherwise nothing
@@ -87,16 +136,20 @@ class V8_BASE_EXPORT RegionAllocator final {
  private:
   class Region : public AddressRegion {
    public:
-    Region(Address address, size_t size, bool is_used)
-        : AddressRegion(address, size), is_used_(is_used) {}
+    Region(Address address, size_t size, RegionState state)
+        : AddressRegion(address, size), state_(state) {}
 
-    bool is_used() const { return is_used_; }
-    void set_is_used(bool used) { is_used_ = used; }
+    bool is_free() const { return state_ == RegionState::kFree; }
+    bool is_allocated() const { return state_ == RegionState::kAllocated; }
+    bool is_excluded() const { return state_ == RegionState::kExcluded; }
+
+    RegionState state() { return state_; }
+    void set_state(RegionState state) { state_ = state; }
 
     void Print(std::ostream& os) const;
 
    private:
-    bool is_used_;
+    RegionState state_;
   };
 
   // The whole region.
@@ -133,6 +186,10 @@ class V8_BASE_EXPORT RegionAllocator final {
   // Free regions ordered by sizes and addresses.
   std::set<Region*, SizeAddressOrder> free_regions_;
 
+  // Callbacks called when regions are split or merged.
+  SplitMergeCallback on_split_;
+  SplitMergeCallback on_merge_;
+
   // Returns region containing given address or nullptr.
   AllRegionsSet::iterator FindRegion(Address address);
 
@@ -153,12 +210,11 @@ class V8_BASE_EXPORT RegionAllocator final {
   void Merge(AllRegionsSet::iterator prev_iter,
              AllRegionsSet::iterator next_iter);
 
+  FRIEND_TEST(RegionAllocatorTest, AllocateExcluded);
   FRIEND_TEST(RegionAllocatorTest, AllocateRegionRandom);
-  FRIEND_TEST(RegionAllocatorTest, Fragmentation);
-  FRIEND_TEST(RegionAllocatorTest, FindRegion);
   FRIEND_TEST(RegionAllocatorTest, Contains);
-
-  DISALLOW_COPY_AND_ASSIGN(RegionAllocator);
+  FRIEND_TEST(RegionAllocatorTest, FindRegion);
+  FRIEND_TEST(RegionAllocatorTest, Fragmentation);
 };
 
 }  // namespace base

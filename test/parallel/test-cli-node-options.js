@@ -26,6 +26,7 @@ expect('--no-deprecation', 'B\n');
 expect('--no-warnings', 'B\n');
 expect('--no_warnings', 'B\n');
 expect('--trace-warnings', 'B\n');
+expect('--no-extra-info-on-fatal-exception', 'B\n');
 expect('--redirect-warnings=_', 'B\n');
 expect('--trace-deprecation', 'B\n');
 expect('--trace-sync-io', 'B\n');
@@ -61,7 +62,8 @@ if (common.isLinux) {
 if (common.hasCrypto) {
   expectNoWorker('--use-openssl-ca', 'B\n');
   expectNoWorker('--use-bundled-ca', 'B\n');
-  expectNoWorker('--openssl-config=_ossl_cfg', 'B\n');
+  if (!common.hasOpenSSL3)
+    expectNoWorker('--openssl-config=_ossl_cfg', 'B\n');
 }
 
 // V8 options
@@ -70,16 +72,17 @@ expect('--disallow-code-generation-from-strings', 'B\n');
 expect('--huge-max-old-generation-size', 'B\n');
 expect('--jitless', 'B\n');
 expect('--max-old-space-size=0', 'B\n');
+expect('--max-semi-space-size=0', 'B\n');
 expect('--stack-trace-limit=100',
        /(\s*at f \(\[(eval|worker eval)\]:1:\d*\)\r?\n)/,
        '(function f() { f(); })();',
        true);
-// Unsupported on arm and s390. See https://crbug.com/v8/8713.
-if (!['arm', 'arm64', 's390x'].includes(process.arch))
+// Unsupported on arm. See https://crbug.com/v8/8713.
+if (!['arm', 'arm64'].includes(process.arch))
   expect('--interpreted-frames-native-stack', 'B\n');
 
 // Workers can't eval as ES Modules. https://github.com/nodejs/node/issues/30682
-expectNoWorker('--experimental-top-level-await --input-type=module',
+expectNoWorker('--input-type=module',
                'B\n', 'console.log(await "B")');
 
 function expectNoWorker(opt, want, command, wantsError) {

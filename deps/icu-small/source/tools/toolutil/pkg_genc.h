@@ -68,22 +68,23 @@
 
 
 
-U_INTERNAL void U_EXPORT2
+U_CAPI void U_EXPORT2
 printAssemblyHeadersToStdErr(void);
 
-U_INTERNAL UBool U_EXPORT2
+U_CAPI UBool U_EXPORT2
 checkAssemblyHeaderName(const char* optAssembly);
 
-U_INTERNAL void U_EXPORT2
+U_CAPI void U_EXPORT2
 writeCCode(
     const char *filename,
     const char *destdir,
+    const char *optEntryPoint,
     const char *optName,
     const char *optFilename,
     char *outFilePath,
     size_t outFilePathCapacity);
 
-U_INTERNAL void U_EXPORT2
+U_CAPI void U_EXPORT2
 writeAssemblyCode(
     const char *filename,
     const char *destdir,
@@ -92,7 +93,7 @@ writeAssemblyCode(
     char *outFilePath,
     size_t outFilePathCapacity);
 
-U_INTERNAL void U_EXPORT2
+U_CAPI void U_EXPORT2
 writeObjectCode(
     const char *filename,
     const char *destdir,

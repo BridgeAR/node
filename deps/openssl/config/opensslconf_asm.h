@@ -19,7 +19,7 @@
   | --dest-os | --dest-cpu | OpenSSL target arch  | CI  |
   | --------- | ---------- | -------------------- | --- |
   | aix       | ppc        | aix-gcc              | o   |
-  | aix       | ppc64      | aix64-gcc            | o   |
+  | aix       | ppc64      | aix64-gcc-as         | o   |
   | linux     | ia32       | linux-elf            | o   |
   | linux     | x32        | linux-x32            | -   |
   | linux     | x64        | linux-x86_64         | o   |
@@ -32,6 +32,7 @@
   | linux     | s390x      | linux64-s390x        | o   |
   | mac       | ia32       | darwin-i386-cc       | -   |
   | mac       | x64        | darwin64-x86-cc      | o   |
+  | mac       | arm64      | darwin64-arm64-cc    | -   |
   | win       | ia32       | VC-WIN32             | -   |
   | win       | x64        | VC-WIN64A            | o   |
   | solaris   | ia32       | solaris-x86-gcc      | o   |
@@ -92,8 +93,6 @@
 
 #if defined(OPENSSL_LINUX) && defined(__i386__)
 # include "./archs/linux-elf/asm/include/openssl/opensslconf.h"
-#elif defined(OPENSSL_LINUX) && defined(__ILP32__)
-# include "./archs/linux-x32/asm/include/openssl/opensslconf.h"
 #elif defined(OPENSSL_LINUX) && defined(__x86_64__)
 # include "./archs/linux-x86_64/asm/include/openssl/opensslconf.h"
 #elif defined(OPENSSL_LINUX) && defined(__arm__)
@@ -104,6 +103,8 @@
 # include "./archs/darwin-i386-cc/asm/include/openssl/opensslconf.h"
 #elif defined(__APPLE__) && defined(__MACH__) && defined(__x86_64__)
 # include "./archs/darwin64-x86_64-cc/asm/include/openssl/opensslconf.h"
+#elif defined(__APPLE__) && defined(__MACH__) && defined(__arm64__)
+# include "./archs/darwin64-arm64-cc/asm/include/openssl/opensslconf.h"
 #elif defined(_WIN32) && defined(_M_IX86)
 # include "./archs/VC-WIN32/asm/include/openssl/opensslconf.h"
 #elif defined(_WIN32) && defined(_M_X64)
@@ -123,7 +124,7 @@
 #elif defined(OPENSSL_LINUX) && !defined(__PPC64__) && defined(__ppc__)
 # include "./archs/linux-ppc/asm/include/openssl/opensslconf.h"
 #elif defined(_AIX) && defined(_ARCH_PPC64)
-# include "./archs/aix64-gcc/asm/include/openssl/opensslconf.h"
+# include "./archs/aix64-gcc-as/asm/include/openssl/opensslconf.h"
 #elif defined(_AIX) && !defined(_ARCH_PPC64) && defined(_ARCH_PPC)
 # include "./archs/aix-gcc/asm/include/openssl/opensslconf.h"
 #elif defined(OPENSSL_LINUX) && defined(__s390x__)

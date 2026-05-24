@@ -17,9 +17,9 @@ using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Int32;
+using v8::Isolate;
 using v8::Local;
 using v8::Object;
-using v8::String;
 using v8::Value;
 
 
@@ -179,7 +179,7 @@ void JSStream::ReadBuffer(const FunctionCallbackInfo<Value>& args) {
 
     memcpy(buf.base, data, avail);
     data += avail;
-    len -= avail;
+    len -= static_cast<int>(avail);
     wrap->EmitRead(avail, buf);
   }
 }
@@ -198,26 +198,22 @@ void JSStream::Initialize(Local<Object> target,
                           Local<Context> context,
                           void* priv) {
   Environment* env = Environment::GetCurrent(context);
+  Isolate* isolate = env->isolate();
 
-  Local<FunctionTemplate> t = env->NewFunctionTemplate(New);
-  Local<String> jsStreamString =
-      FIXED_ONE_BYTE_STRING(env->isolate(), "JSStream");
-  t->SetClassName(jsStreamString);
+  Local<FunctionTemplate> t = NewFunctionTemplate(isolate, New);
   t->InstanceTemplate()
     ->SetInternalFieldCount(StreamBase::kInternalFieldCount);
   t->Inherit(AsyncWrap::GetConstructorTemplate(env));
 
-  env->SetProtoMethod(t, "finishWrite", Finish<WriteWrap>);
-  env->SetProtoMethod(t, "finishShutdown", Finish<ShutdownWrap>);
-  env->SetProtoMethod(t, "readBuffer", ReadBuffer);
-  env->SetProtoMethod(t, "emitEOF", EmitEOF);
+  SetProtoMethod(isolate, t, "finishWrite", Finish<WriteWrap>);
+  SetProtoMethod(isolate, t, "finishShutdown", Finish<ShutdownWrap>);
+  SetProtoMethod(isolate, t, "readBuffer", ReadBuffer);
+  SetProtoMethod(isolate, t, "emitEOF", EmitEOF);
 
   StreamBase::AddMethods(env, t);
-  target->Set(env->context(),
-              jsStreamString,
-              t->GetFunction(context).ToLocalChecked()).Check();
+  SetConstructorFunction(context, target, "JSStream", t);
 }
 
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(js_stream, node::JSStream::Initialize)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(js_stream, node::JSStream::Initialize)

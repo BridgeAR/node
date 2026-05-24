@@ -5,10 +5,10 @@
 #ifndef V8_OBJECTS_JS_COLLECTION_INL_H_
 #define V8_OBJECTS_JS_COLLECTION_INL_H_
 
-#include "src/objects/js-collection.h"
-
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/objects/heap-object-inl.h"
+#include "src/objects/js-collection-iterator-inl.h"
+#include "src/objects/js-collection.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/ordered-hash-table-inl.h"
 #include "src/roots/roots-inl.h"
@@ -19,6 +19,8 @@
 namespace v8 {
 namespace internal {
 
+#include "torque-generated/src/objects/js-collection-tq-inl.inc"
+
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSCollection)
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSMap)
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSSet)
@@ -26,10 +28,6 @@ TQ_OBJECT_CONSTRUCTORS_IMPL(JSWeakCollection)
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSWeakMap)
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSWeakSet)
 
-// TODO(jkummerow): Move JSCollectionIterator to js-collection.h?
-// TODO(jkummerow): Introduce IsJSCollectionIterator() check? Or unchecked
-// version of OBJECT_CONSTRUCTORS_IMPL macro?
-TQ_OBJECT_CONSTRUCTORS_IMPL(JSCollectionIterator)
 template <class Derived, class TableType>
 OrderedHashTableIterator<Derived, TableType>::OrderedHashTableIterator(
     Address ptr)
@@ -37,22 +35,24 @@ OrderedHashTableIterator<Derived, TableType>::OrderedHashTableIterator(
 
 JSMapIterator::JSMapIterator(Address ptr)
     : OrderedHashTableIterator<JSMapIterator, OrderedHashMap>(ptr) {
-  SLOW_DCHECK(IsJSMapIterator());
+  SLOW_DCHECK(IsJSMapIterator(*this));
 }
 
 JSSetIterator::JSSetIterator(Address ptr)
     : OrderedHashTableIterator<JSSetIterator, OrderedHashSet>(ptr) {
-  SLOW_DCHECK(IsJSSetIterator());
+  SLOW_DCHECK(IsJSSetIterator(*this));
 }
 
 CAST_ACCESSOR(JSSetIterator)
 CAST_ACCESSOR(JSMapIterator)
 
-Object JSMapIterator::CurrentValue() {
-  OrderedHashMap table = OrderedHashMap::cast(this->table());
+Tagged<Object> JSMapIterator::CurrentValue() {
+  Tagged<OrderedHashMap> table = OrderedHashMap::cast(this->table());
   int index = Smi::ToInt(this->index());
-  Object value = table.ValueAt(index);
-  DCHECK(!value.IsTheHole());
+  DCHECK_GE(index, 0);
+  InternalIndex entry(index);
+  Tagged<Object> value = table->ValueAt(entry);
+  DCHECK(!IsTheHole(value));
   return value;
 }
 

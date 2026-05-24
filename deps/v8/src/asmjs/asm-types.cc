@@ -6,9 +6,6 @@
 
 #include <cinttypes>
 
-#include "src/init/v8.h"
-#include "src/utils/utils.h"
-
 namespace v8 {
 namespace internal {
 namespace wasm {
@@ -172,7 +169,7 @@ class AsmFroundType final : public AsmCallableType {
 }  // namespace
 
 AsmType* AsmType::FroundType(Zone* zone) {
-  auto* Fround = new (zone) AsmFroundType();
+  auto* Fround = zone->New<AsmFroundType>();
   return reinterpret_cast<AsmType*>(Fround);
 }
 
@@ -195,6 +192,7 @@ namespace {
 class AsmMinMaxType final : public AsmCallableType {
  private:
   friend AsmType;
+  friend Zone;
 
   AsmMinMaxType(AsmType* dest, AsmType* src)
       : AsmCallableType(), return_type_(dest), arg_(src) {}
@@ -231,7 +229,7 @@ class AsmMinMaxType final : public AsmCallableType {
 AsmType* AsmType::MinMaxType(Zone* zone, AsmType* dest, AsmType* src) {
   DCHECK_NOT_NULL(dest->AsValueType());
   DCHECK_NOT_NULL(src->AsValueType());
-  auto* MinMax = new (zone) AsmMinMaxType(dest, src);
+  auto* MinMax = zone->New<AsmMinMaxType>(dest, src);
   return reinterpret_cast<AsmType*>(MinMax);
 }
 

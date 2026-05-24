@@ -24,12 +24,16 @@
 
 namespace U_ICU_NAMESPACE {
 class RelativeDateTimeFormatter;
-}
+}  // namespace U_ICU_NAMESPACE
 
 namespace v8 {
 namespace internal {
 
-class JSRelativeTimeFormat : public JSObject {
+#include "torque-generated/src/objects/js-relative-time-format-tq.inc"
+
+class JSRelativeTimeFormat
+    : public TorqueGeneratedJSRelativeTimeFormat<JSRelativeTimeFormat,
+                                                 JSObject> {
  public:
   // Creates relative time format object with properties derived from input
   // locales and options.
@@ -54,13 +58,8 @@ class JSRelativeTimeFormat : public JSObject {
 
   V8_EXPORT_PRIVATE static const std::set<std::string>& GetAvailableLocales();
 
-  DECL_CAST(JSRelativeTimeFormat)
-
   // RelativeTimeFormat accessors.
-  DECL_ACCESSORS(locale, String)
-  DECL_ACCESSORS(numberingSystem, String)
-
-  DECL_ACCESSORS(icu_formatter, Managed<icu::RelativeDateTimeFormatter>)
+  DECL_ACCESSORS(icu_formatter, Tagged<Managed<icu::RelativeDateTimeFormatter>>)
 
   // Numeric: identifying whether numerical descriptions are always used, or
   // used only when no more specific version is available (e.g., "1 day ago" vs
@@ -78,21 +77,12 @@ class JSRelativeTimeFormat : public JSObject {
   // Bit positions in |flags|.
   DEFINE_TORQUE_GENERATED_JS_RELATIVE_TIME_FORMAT_FLAGS()
 
-  STATIC_ASSERT(Numeric::AUTO <= NumericBit::kMax);
-  STATIC_ASSERT(Numeric::ALWAYS <= NumericBit::kMax);
-
-  // [flags] Bit field containing various flags about the function.
-  DECL_INT_ACCESSORS(flags)
+  static_assert(Numeric::AUTO <= NumericBit::kMax);
+  static_assert(Numeric::ALWAYS <= NumericBit::kMax);
 
   DECL_PRINTER(JSRelativeTimeFormat)
-  DECL_VERIFIER(JSRelativeTimeFormat)
 
-  // Layout description.
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                TORQUE_GENERATED_JS_RELATIVE_TIME_FORMAT_FIELDS)
-
- private:
-  OBJECT_CONSTRUCTORS(JSRelativeTimeFormat, JSObject);
+  TQ_OBJECT_CONSTRUCTORS(JSRelativeTimeFormat)
 };
 
 }  // namespace internal

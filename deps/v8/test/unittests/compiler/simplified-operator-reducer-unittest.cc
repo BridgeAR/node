@@ -3,12 +3,10 @@
 // found in the LICENSE file.
 
 #include "src/compiler/simplified-operator-reducer.h"
+
 #include "src/codegen/tick-counter.h"
-#include "src/compiler/access-builder.h"
 #include "src/compiler/js-graph.h"
-#include "src/compiler/node-properties.h"
 #include "src/compiler/simplified-operator.h"
-#include "src/compiler/types.h"
 #include "src/numbers/conversions-inl.h"
 #include "test/unittests/compiler/graph-unittest.h"
 #include "test/unittests/compiler/node-test-utils.h"
@@ -30,13 +28,13 @@ class SimplifiedOperatorReducerTest : public GraphTest {
 
  protected:
   Reduction Reduce(Node* node) {
-    JSHeapBroker broker(isolate(), zone(), FLAG_trace_heap_broker, false);
     MachineOperatorBuilder machine(zone());
     JSOperatorBuilder javascript(zone());
     JSGraph jsgraph(isolate(), graph(), common(), &javascript, simplified(),
                     &machine);
-    GraphReducer graph_reducer(zone(), graph(), tick_counter());
-    SimplifiedOperatorReducer reducer(&graph_reducer, &jsgraph, &broker);
+    GraphReducer graph_reducer(zone(), graph(), tick_counter(), broker());
+    SimplifiedOperatorReducer reducer(&graph_reducer, &jsgraph, broker(),
+                                      BranchSemantics::kJS);
     return reducer.Reduce(node);
   }
 
@@ -96,8 +94,8 @@ const int32_t kInt32Values[] = {
 
 const double kNaNs[] = {-std::numeric_limits<double>::quiet_NaN(),
                         std::numeric_limits<double>::quiet_NaN(),
-                        bit_cast<double>(uint64_t{0x7FFFFFFFFFFFFFFF}),
-                        bit_cast<double>(uint64_t{0xFFFFFFFFFFFFFFFF})};
+                        base::bit_cast<double>(uint64_t{0x7FFFFFFFFFFFFFFF}),
+                        base::bit_cast<double>(uint64_t{0xFFFFFFFFFFFFFFFF})};
 
 const CheckForMinusZeroMode kCheckForMinusZeroModes[] = {
     CheckForMinusZeroMode::kDontCheckForMinusZero,
@@ -497,6 +495,63 @@ TEST_F(SimplifiedOperatorReducerTest, ObjectIsSmiWithNumberConstant) {
         graph()->NewNode(simplified()->ObjectIsSmi(), NumberConstant(n)));
     ASSERT_TRUE(reduction.Changed());
     EXPECT_THAT(reduction.replacement(), IsBooleanConstant(IsSmiDouble(n)));
+  }
+}
+
+// -----------------------------------------------------------------------------
+// CheckedInt32Add
+
+TEST_F(SimplifiedOperatorReducerTest,
+       CheckedInt32AddConsecutivelyWithConstants) {
+  Node* p0 = Parameter(0);
+  Node* effect = graph()->start();
+  Node* control = graph()->start();
+  TRACED_FOREACH(int32_t, a, kInt32Values) {
+    TRACED_FOREACH(int32_t, b, kInt32Values) {
+      Node* add1 = graph()->NewNode(simplified()->CheckedInt32Add(), p0,
+                                    Int32Constant(a), effect, control);
+      Node* add2 = graph()->NewNode(simplified()->CheckedInt32Add(), add1,
+                                    Int32Constant(b), add1, control);
+
+      Reduction r = Reduce(add2);
+      int32_t c;
+      bool overflow = base::bits::SignedAddOverflow32(a, b, &c);
+      if ((a >= 0) == (b >= 0) && !overflow) {
+        ASSERT_TRUE(r.Changed());
+        Node* new_node = r.replacement();
+        ASSERT_EQ(new_node->opcode(), IrOpcode::kCheckedInt32Add);
+        ASSERT_EQ(new_node->InputAt(0), p0);
+        EXPECT_THAT(new_node->InputAt(1), IsInt32Constant(c));
+        ASSERT_EQ(new_node->InputAt(2), effect);
+        ASSERT_EQ(new_node->InputAt(3), control);
+        EXPECT_TRUE(add1->uses().empty());
+      } else {
+        ASSERT_FALSE(r.Changed());
+      }
+    }
+  }
+}
+
+TEST_F(SimplifiedOperatorReducerTest,
+       CheckedInt32AddConsecutivelyWithConstantsNoChanged) {
+  Node* p0 = Parameter(0);
+  Node* effect = graph()->start();
+  Node* control = graph()->start();
+  TRACED_FOREACH(int32_t, a, kInt32Values) {
+    TRACED_FOREACH(int32_t, b, kInt32Values) {
+      Node* add1 = graph()->NewNode(simplified()->CheckedInt32Add(), p0,
+                                    Int32Constant(a), effect, control);
+      Node* add2 = graph()->NewNode(simplified()->CheckedInt32Add(), add1,
+                                    Int32Constant(b), add1, control);
+      Node* add3 = graph()->NewNode(simplified()->CheckedInt32Add(), add1,
+                                    Int32Constant(b), effect, control);
+
+      // No changed since add1 has other value uses.
+      Reduction r = Reduce(add2);
+      ASSERT_FALSE(r.Changed());
+      r = Reduce(add3);
+      ASSERT_FALSE(r.Changed());
+    }
   }
 }
 

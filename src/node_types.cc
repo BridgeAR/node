@@ -1,5 +1,6 @@
 #include "env-inl.h"
 #include "node.h"
+#include "node_external_reference.h"
 
 using v8::Context;
 using v8::FunctionCallbackInfo;
@@ -64,19 +65,25 @@ void InitializeTypes(Local<Object> target,
                      Local<Value> unused,
                      Local<Context> context,
                      void* priv) {
-  Environment* env = Environment::GetCurrent(context);
-
-#define V(type) env->SetMethodNoSideEffect(target,     \
-                                           "is" #type, \
-                                           Is##type);
+#define V(type) SetMethodNoSideEffect(context, target, "is" #type, Is##type);
   VALUE_METHOD_MAP(V)
 #undef V
 
-  env->SetMethodNoSideEffect(target, "isAnyArrayBuffer", IsAnyArrayBuffer);
-  env->SetMethodNoSideEffect(target, "isBoxedPrimitive", IsBoxedPrimitive);
+  SetMethodNoSideEffect(context, target, "isAnyArrayBuffer", IsAnyArrayBuffer);
+  SetMethodNoSideEffect(context, target, "isBoxedPrimitive", IsBoxedPrimitive);
 }
 
 }  // anonymous namespace
+
+void RegisterTypesExternalReferences(ExternalReferenceRegistry* registry) {
+#define V(type) registry->Register(Is##type);
+  VALUE_METHOD_MAP(V)
+#undef V
+
+  registry->Register(IsAnyArrayBuffer);
+  registry->Register(IsBoxedPrimitive);
+}
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(types, node::InitializeTypes)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(types, node::InitializeTypes)
+NODE_BINDING_EXTERNAL_REFERENCE(types, node::RegisterTypesExternalReferences)

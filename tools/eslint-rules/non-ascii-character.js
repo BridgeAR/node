@@ -21,7 +21,7 @@ const suggestions = {
   '”': '"',
   '«': '"',
   '»': '"',
-  '—': '-'
+  '—': '-',
 };
 
 module.exports = (context) => {
@@ -46,16 +46,10 @@ module.exports = (context) => {
       node,
       message,
       loc: sourceCode.getLocFromIndex(offendingCharacterPosition),
-      fix: (fixer) => {
-        return fixer.replaceText(
-          node,
-          suggestion ? `${suggestion}` : ''
-        );
-      }
     });
   };
 
   return {
-    Program: (node) => reportIfError(node, context.getSourceCode())
+    Program: (node) => reportIfError(node, context.getSourceCode()),
   };
 };

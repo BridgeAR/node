@@ -3,15 +3,15 @@
 // found in the LICENSE file.
 
 #include "src/builtins/builtins-proxy-gen.h"
+
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins-utils.h"
 #include "src/builtins/builtins.h"
-
+#include "src/common/globals.h"
 #include "src/logging/counters.h"
 #include "src/objects/js-proxy.h"
 #include "src/objects/objects-inl.h"
-
-#include "torque-generated/exported-macros-assembler-tq.h"
+#include "torque-generated/exported-macros-assembler.h"
 
 namespace v8 {
 namespace internal {
@@ -52,8 +52,10 @@ TNode<JSProxy> ProxiesCodeStubAssembler::AllocateProxy(
   BIND(&create_proxy);
   TNode<HeapObject> proxy = Allocate(JSProxy::kSize);
   StoreMapNoWriteBarrier(proxy, map.value());
-  StoreObjectFieldRoot(proxy, JSProxy::kPropertiesOrHashOffset,
-                       RootIndex::kEmptyPropertyDictionary);
+  RootIndex empty_dict = V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL
+                             ? RootIndex::kEmptySwissPropertyDictionary
+                             : RootIndex::kEmptyPropertyDictionary;
+  StoreObjectFieldRoot(proxy, JSProxy::kPropertiesOrHashOffset, empty_dict);
   StoreObjectFieldNoWriteBarrier(proxy, JSProxy::kTargetOffset, target);
   StoreObjectFieldNoWriteBarrier(proxy, JSProxy::kHandlerOffset, handler);
 
@@ -62,9 +64,10 @@ TNode<JSProxy> ProxiesCodeStubAssembler::AllocateProxy(
 
 TNode<Context> ProxiesCodeStubAssembler::CreateProxyRevokeFunctionContext(
     TNode<JSProxy> proxy, TNode<NativeContext> native_context) {
-  const TNode<Context> context =
-      AllocateSyntheticFunctionContext(native_context, kProxyContextLength);
-  StoreContextElementNoWriteBarrier(context, kProxySlot, proxy);
+  const TNode<Context> context = AllocateSyntheticFunctionContext(
+      native_context, ProxyRevokeFunctionContextSlot::kProxyContextLength);
+  StoreContextElementNoWriteBarrier(
+      context, ProxyRevokeFunctionContextSlot::kProxySlot, proxy);
   return context;
 }
 
@@ -76,21 +79,19 @@ TNode<JSFunction> ProxiesCodeStubAssembler::AllocateProxyRevokeFunction(
       CreateProxyRevokeFunctionContext(proxy, native_context);
   const TNode<Map> revoke_map = CAST(LoadContextElement(
       native_context, Context::STRICT_FUNCTION_WITHOUT_PROTOTYPE_MAP_INDEX));
-  const TNode<SharedFunctionInfo> revoke_info = CAST(
-      LoadContextElement(native_context, Context::PROXY_REVOKE_SHARED_FUN));
+  const TNode<SharedFunctionInfo> revoke_info = ProxyRevokeSharedFunConstant();
 
   return AllocateFunctionWithMapAndContext(revoke_map, revoke_info,
                                            proxy_context);
 }
 
 TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
-  TNode<Int32T> argc =
-      UncheckedCast<Int32T>(Parameter(Descriptor::kActualArgumentsCount));
+  auto argc = UncheckedParameter<Int32T>(Descriptor::kActualArgumentsCount);
   TNode<IntPtrT> argc_ptr = ChangeInt32ToIntPtr(argc);
-  TNode<JSProxy> proxy = CAST(Parameter(Descriptor::kFunction));
-  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  auto proxy = Parameter<JSProxy>(Descriptor::kFunction);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
-  CSA_ASSERT(this, IsCallable(proxy));
+  CSA_DCHECK(this, IsCallable(proxy));
 
   PerformStackCheck(context);
 
@@ -102,11 +103,11 @@ TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
       CAST(LoadObjectField(proxy, JSProxy::kHandlerOffset));
 
   // 2. If handler is null, throw a TypeError exception.
-  CSA_ASSERT(this, IsNullOrJSReceiver(handler));
-  GotoIfNot(IsJSReceiver(handler), &throw_proxy_handler_revoked);
+  CSA_DCHECK(this, IsNullOrJSReceiver(handler));
+  GotoIfNot(JSAnyIsNotPrimitive(handler), &throw_proxy_handler_revoked);
 
   // 3. Assert: Type(handler) is Object.
-  CSA_ASSERT(this, IsJSReceiver(handler));
+  CSA_DCHECK(this, IsJSReceiver(handler));
 
   // 4. Let target be the value of the [[ProxyTarget]] internal slot of O.
   TNode<Object> target = LoadObjectField(proxy, JSProxy::kTargetOffset);
@@ -120,10 +121,10 @@ TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
   TNode<Object> receiver = args.GetReceiver();
 
   // 7. Let argArray be CreateArrayFromList(argumentsList).
-  TNode<JSArray> array =
-      EmitFastNewAllArguments(UncheckedCast<Context>(context),
-                              UncheckedCast<RawPtrT>(LoadFramePointer()),
-                              UncheckedCast<IntPtrT>(argc_ptr));
+  TNode<JSArray> array = EmitFastNewAllArguments(
+      UncheckedCast<Context>(context),
+      UncheckedCast<RawPtrT>(LoadFramePointer()),
+      UncheckedCast<IntPtrT>(args.GetLengthWithoutReceiver()));
 
   // 8. Return Call(trap, handler, «target, thisArgument, argArray»).
   TNode<Object> result = Call(context, trap, handler, target, receiver, array);
@@ -140,14 +141,15 @@ TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
 }
 
 TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
-  TNode<Int32T> argc =
-      UncheckedCast<Int32T>(Parameter(Descriptor::kActualArgumentsCount));
+  auto argc = UncheckedParameter<Int32T>(Descriptor::kActualArgumentsCount);
   TNode<IntPtrT> argc_ptr = ChangeInt32ToIntPtr(argc);
-  TNode<JSProxy> proxy = CAST(Parameter(Descriptor::kTarget));
-  TNode<Object> new_target = CAST(Parameter(Descriptor::kNewTarget));
-  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  auto proxy = Parameter<JSProxy>(Descriptor::kTarget);
+  auto new_target = Parameter<Object>(Descriptor::kNewTarget);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
-  CSA_ASSERT(this, IsCallable(proxy));
+  CSA_DCHECK(this, IsCallable(proxy));
+
+  PerformStackCheck(context);
 
   Label throw_proxy_handler_revoked(this, Label::kDeferred),
       trap_undefined(this), not_an_object(this, Label::kDeferred);
@@ -157,11 +159,11 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
       CAST(LoadObjectField(proxy, JSProxy::kHandlerOffset));
 
   // 2. If handler is null, throw a TypeError exception.
-  CSA_ASSERT(this, IsNullOrJSReceiver(handler));
-  GotoIfNot(IsJSReceiver(handler), &throw_proxy_handler_revoked);
+  CSA_DCHECK(this, IsNullOrJSReceiver(handler));
+  GotoIfNot(JSAnyIsNotPrimitive(handler), &throw_proxy_handler_revoked);
 
   // 3. Assert: Type(handler) is Object.
-  CSA_ASSERT(this, IsJSReceiver(handler));
+  CSA_DCHECK(this, IsJSReceiver(handler));
 
   // 4. Let target be the value of the [[ProxyTarget]] internal slot of O.
   TNode<Object> target = LoadObjectField(proxy, JSProxy::kTargetOffset);
@@ -174,10 +176,10 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
   CodeStubArguments args(this, argc_ptr);
 
   // 7. Let argArray be CreateArrayFromList(argumentsList).
-  TNode<JSArray> array =
-      EmitFastNewAllArguments(UncheckedCast<Context>(context),
-                              UncheckedCast<RawPtrT>(LoadFramePointer()),
-                              UncheckedCast<IntPtrT>(argc_ptr));
+  TNode<JSArray> array = EmitFastNewAllArguments(
+      UncheckedCast<Context>(context),
+      UncheckedCast<RawPtrT>(LoadFramePointer()),
+      UncheckedCast<IntPtrT>(args.GetLengthWithoutReceiver()));
 
   // 8. Let newObj be ? Call(trap, handler, « target, argArray, newTarget »).
   TNode<Object> new_obj =
@@ -185,7 +187,7 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
 
   // 9. If Type(newObj) is not Object, throw a TypeError exception.
   GotoIf(TaggedIsSmi(new_obj), &not_an_object);
-  GotoIfNot(IsJSReceiver(CAST(new_obj)), &not_an_object);
+  GotoIfNot(JSAnyIsNotPrimitive(CAST(new_obj)), &not_an_object);
 
   // 10. Return newObj.
   args.PopAndReturn(new_obj);
@@ -198,7 +200,7 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
   BIND(&trap_undefined);
   {
     // 6.a. Assert: target has a [[Construct]] internal method.
-    CSA_ASSERT(this, IsConstructor(CAST(target)));
+    CSA_DCHECK(this, IsConstructor(CAST(target)));
 
     // 6.b. Return ? Construct(target, argumentsList, newTarget).
     TailCallStub(CodeFactory::Construct(isolate()), context, target, new_target,

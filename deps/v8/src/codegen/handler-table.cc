@@ -12,19 +12,29 @@
 #include "src/objects/code-inl.h"
 #include "src/objects/objects-inl.h"
 
+#if V8_ENABLE_WEBASSEMBLY
+#include "src/wasm/wasm-code-manager.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
+
 namespace v8 {
 namespace internal {
 
-HandlerTable::HandlerTable(Code code)
-    : HandlerTable(code.InstructionStart() + code.handler_table_offset(),
-                   code.handler_table_size(), kReturnAddressBasedEncoding) {}
+HandlerTable::HandlerTable(Tagged<Code> code)
+    : HandlerTable(code->handler_table_address(), code->handler_table_size(),
+                   kReturnAddressBasedEncoding) {}
 
-HandlerTable::HandlerTable(BytecodeArray bytecode_array)
-    : HandlerTable(bytecode_array.handler_table()) {}
+#if V8_ENABLE_WEBASSEMBLY
+HandlerTable::HandlerTable(const wasm::WasmCode* code)
+    : HandlerTable(code->handler_table(), code->handler_table_size(),
+                   kReturnAddressBasedEncoding) {}
+#endif  // V8_ENABLE_WEBASSEMBLY
 
-HandlerTable::HandlerTable(ByteArray byte_array)
-    : HandlerTable(reinterpret_cast<Address>(byte_array.GetDataStartAddress()),
-                   byte_array.length(), kRangeBasedEncoding) {}
+HandlerTable::HandlerTable(Tagged<BytecodeArray> bytecode_array)
+    : HandlerTable(bytecode_array->handler_table()) {}
+
+HandlerTable::HandlerTable(Tagged<ByteArray> byte_array)
+    : HandlerTable(reinterpret_cast<Address>(byte_array->GetDataStartAddress()),
+                   byte_array->length(), kRangeBasedEncoding) {}
 
 HandlerTable::HandlerTable(Address handler_table, int handler_table_size,
                            EncodingMode encoding_mode)
@@ -137,7 +147,7 @@ int HandlerTable::LengthForRange(int entries) {
 
 // static
 int HandlerTable::EmitReturnTableStart(Assembler* masm) {
-  masm->DataAlign(sizeof(int32_t));  // Make sure entries are aligned.
+  masm->DataAlign(InstructionStream::kMetadataAlignment);
   masm->RecordComment(";;; Exception handler table.");
   int table_start = masm->pc_offset();
   return table_start;
@@ -199,6 +209,8 @@ int HandlerTable::LookupReturn(int pc_offset) {
     bool operator==(const Iterator& other) const {
       return index == other.index;
     }
+    // GLIBCXX_DEBUG checks uses the <= comparator.
+    bool operator<=(const Iterator& other) { return index <= other.index; }
     Iterator& operator++() {
       index++;
       return *this;

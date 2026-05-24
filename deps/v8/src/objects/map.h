@@ -9,16 +9,21 @@
 #include "src/common/globals.h"
 #include "src/objects/code.h"
 #include "src/objects/heap-object.h"
+#include "src/objects/instance-type-checker.h"
 #include "src/objects/internal-index.h"
 #include "src/objects/objects.h"
-#include "torque-generated/bit-fields-tq.h"
-#include "torque-generated/field-offsets-tq.h"
+#include "src/objects/prototype-info.h"
+#include "src/roots/roots.h"
+#include "torque-generated/bit-fields.h"
+#include "torque-generated/visitor-lists.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
 
 namespace v8 {
 namespace internal {
+
+class WasmTypeInfo;
 
 enum InstanceType : uint16_t;
 
@@ -29,67 +34,74 @@ enum InstanceType : uint16_t;
   V(DataObject)                      \
   V(FeedbackMetadata)                \
   V(FixedDoubleArray)                \
-  V(SeqOneByteString)                \
-  V(SeqTwoByteString)
+  IF_WASM(V, WasmNull)
 
-#define POINTER_VISITOR_ID_LIST(V)     \
-  V(AllocationSite)                    \
-  V(BytecodeArray)                     \
-  V(Cell)                              \
-  V(Code)                              \
-  V(CodeDataContainer)                 \
-  V(ConsString)                        \
-  V(Context)                           \
-  V(DataHandler)                       \
-  V(DescriptorArray)                   \
-  V(EmbedderDataArray)                 \
-  V(EphemeronHashTable)                \
-  V(FeedbackCell)                      \
-  V(FeedbackVector)                    \
-  V(FixedArray)                        \
-  V(FreeSpace)                         \
-  V(JSApiObject)                       \
-  V(JSArrayBuffer)                     \
-  V(JSDataView)                        \
-  V(JSFunction)                        \
-  V(JSObject)                          \
-  V(JSObjectFast)                      \
-  V(JSTypedArray)                      \
-  V(JSWeakRef)                         \
-  V(JSWeakCollection)                  \
-  V(Map)                               \
-  V(NativeContext)                     \
-  V(Oddball)                           \
-  V(PreparseData)                      \
-  V(PropertyArray)                     \
-  V(PropertyCell)                      \
-  V(PrototypeInfo)                     \
-  V(SharedFunctionInfo)                \
-  V(ShortcutCandidate)                 \
-  V(SlicedString)                      \
-  V(SmallOrderedHashMap)               \
-  V(SmallOrderedHashSet)               \
-  V(SmallOrderedNameDictionary)        \
-  V(SourceTextModule)                  \
-  V(Struct)                            \
-  V(Symbol)                            \
-  V(SyntheticModule)                   \
-  V(ThinString)                        \
-  V(TransitionArray)                   \
-  V(UncompiledDataWithoutPreparseData) \
-  V(UncompiledDataWithPreparseData)    \
-  V(WasmCapiFunctionData)              \
-  V(WasmIndirectFunctionTable)         \
-  V(WasmInstanceObject)                \
-  V(WeakArray)                         \
+#define POINTER_VISITOR_ID_LIST(V)      \
+  V(AccessorInfo)                       \
+  V(AllocationSite)                     \
+  V(BytecodeArray)                      \
+  V(ExternalPointerArray)               \
+  V(CallHandlerInfo)                    \
+  V(Cell)                               \
+  V(InstructionStream)                  \
+  V(Code)                               \
+  V(DataHandler)                        \
+  V(EmbedderDataArray)                  \
+  V(EphemeronHashTable)                 \
+  V(ExternalString)                     \
+  V(FeedbackCell)                       \
+  V(FreeSpace)                          \
+  V(JSApiObject)                        \
+  V(JSArrayBuffer)                      \
+  V(JSDataViewOrRabGsabDataView)        \
+  V(JSExternalObject)                   \
+  V(JSFinalizationRegistry)             \
+  V(JSFunction)                         \
+  V(JSObject)                           \
+  V(JSObjectFast)                       \
+  V(JSSynchronizationPrimitive)         \
+  V(JSTypedArray)                       \
+  V(JSWeakRef)                          \
+  V(JSWeakCollection)                   \
+  V(Map)                                \
+  V(NativeContext)                      \
+  V(Oddball)                            \
+  V(Hole)                               \
+  V(PreparseData)                       \
+  V(PromiseOnStack)                     \
+  V(PropertyArray)                      \
+  V(PropertyCell)                       \
+  V(PrototypeInfo)                      \
+  V(SharedFunctionInfo)                 \
+  V(ShortcutCandidate)                  \
+  V(SmallOrderedHashMap)                \
+  V(SmallOrderedHashSet)                \
+  V(SmallOrderedNameDictionary)         \
+  V(SourceTextModule)                   \
+  V(Struct)                             \
+  V(SwissNameDictionary)                \
+  V(Symbol)                             \
+  V(SyntheticModule)                    \
+  V(TransitionArray)                    \
+  IF_WASM(V, WasmApiFunctionRef)        \
+  IF_WASM(V, WasmArray)                 \
+  IF_WASM(V, WasmCapiFunctionData)      \
+  IF_WASM(V, WasmExportedFunctionData)  \
+  IF_WASM(V, WasmFunctionData)          \
+  IF_WASM(V, WasmIndirectFunctionTable) \
+  IF_WASM(V, WasmInstanceObject)        \
+  IF_WASM(V, WasmInternalFunction)      \
+  IF_WASM(V, WasmJSFunctionData)        \
+  IF_WASM(V, WasmResumeData)            \
+  IF_WASM(V, WasmStruct)                \
+  IF_WASM(V, WasmSuspenderObject)       \
+  IF_WASM(V, WasmTypeInfo)              \
+  IF_WASM(V, WasmContinuationObject)    \
   V(WeakCell)
 
-#define TORQUE_OBJECT_BODY_TO_VISITOR_ID_LIST_ADAPTER(V, TYPE, TypeName) \
-  V(TypeName)
-
-#define TORQUE_VISITOR_ID_LIST(V)        \
-  TORQUE_BODY_DESCRIPTOR_LIST_GENERATOR( \
-      TORQUE_OBJECT_BODY_TO_VISITOR_ID_LIST_ADAPTER, V)
+#define TORQUE_VISITOR_ID_LIST(V)     \
+  TORQUE_DATA_ONLY_VISITOR_ID_LIST(V) \
+  TORQUE_POINTER_VISITOR_ID_LIST(V)
 
 // Objects with the same visitor id are processed in the same way by
 // the heap visitors. The visitor ids for data only objects must precede
@@ -97,9 +109,11 @@ enum InstanceType : uint16_t;
 // of whether an object contains only data or may contain pointers.
 enum VisitorId {
 #define VISITOR_ID_ENUM_DECL(id) kVisit##id,
-  DATA_ONLY_VISITOR_ID_LIST(VISITOR_ID_ENUM_DECL) kDataOnlyVisitorIdCount,
+  DATA_ONLY_VISITOR_ID_LIST(VISITOR_ID_ENUM_DECL)
+      TORQUE_DATA_ONLY_VISITOR_ID_LIST(VISITOR_ID_ENUM_DECL)
+          kDataOnlyVisitorIdCount,
   POINTER_VISITOR_ID_LIST(VISITOR_ID_ENUM_DECL)
-      TORQUE_VISITOR_ID_LIST(VISITOR_ID_ENUM_DECL)
+      TORQUE_POINTER_VISITOR_ID_LIST(VISITOR_ID_ENUM_DECL)
 #undef VISITOR_ID_ENUM_DECL
           kVisitorIdCount
 };
@@ -111,94 +125,90 @@ enum class ObjectFields {
 
 using MapHandles = std::vector<Handle<Map>>;
 
+#include "torque-generated/src/objects/map-tq.inc"
+
 // All heap objects have a Map that describes their structure.
 //  A Map contains information about:
 //  - Size information about the object
 //  - How to iterate over an object (for garbage collection)
 //
 // Map layout:
-// +---------------+------------------------------------------------+
-// |   _ Type _    | _ Description _                                |
-// +---------------+------------------------------------------------+
-// | TaggedPointer | map - Always a pointer to the MetaMap root     |
-// +---------------+------------------------------------------------+
-// | Int           | The first int field                            |
-//  `---+----------+------------------------------------------------+
-//      | Byte     | [instance_size]                                |
-//      +----------+------------------------------------------------+
-//      | Byte     | If Map for a primitive type:                   |
-//      |          |   native context index for constructor fn      |
-//      |          | If Map for an Object type:                     |
-//      |          |   inobject properties start offset in words    |
-//      +----------+------------------------------------------------+
-//      | Byte     | [used_or_unused_instance_size_in_words]        |
-//      |          | For JSObject in fast mode this byte encodes    |
-//      |          | the size of the object that includes only      |
-//      |          | the used property fields or the slack size     |
-//      |          | in properties backing store.                   |
-//      +----------+------------------------------------------------+
-//      | Byte     | [visitor_id]                                   |
-// +----+----------+------------------------------------------------+
-// | Int           | The second int field                           |
-//  `---+----------+------------------------------------------------+
-//      | Short    | [instance_type]                                |
-//      +----------+------------------------------------------------+
-//      | Byte     | [bit_field]                                    |
-//      |          |   - has_non_instance_prototype (bit 0)         |
-//      |          |   - is_callable (bit 1)                        |
-//      |          |   - has_named_interceptor (bit 2)              |
-//      |          |   - has_indexed_interceptor (bit 3)            |
-//      |          |   - is_undetectable (bit 4)                    |
-//      |          |   - is_access_check_needed (bit 5)             |
-//      |          |   - is_constructor (bit 6)                     |
-//      |          |   - has_prototype_slot (bit 7)                 |
-//      +----------+------------------------------------------------+
-//      | Byte     | [bit_field2]                                   |
-//      |          |   - new_target_is_base (bit 0)                 |
-//      |          |   - is_immutable_proto (bit 1)                 |
-//      |          |   - unused bit (bit 2)                         |
-//      |          |   - elements_kind (bits 3..7)                  |
-// +----+----------+------------------------------------------------+
-// | Int           | [bit_field3]                                   |
-// |               |   - enum_length (bit 0..9)                     |
-// |               |   - number_of_own_descriptors (bit 10..19)     |
-// |               |   - is_prototype_map (bit 20)                  |
-// |               |   - is_dictionary_map (bit 21)                 |
-// |               |   - owns_descriptors (bit 22)                  |
-// |               |   - is_in_retained_map_list (bit 23)           |
-// |               |   - is_deprecated (bit 24)                     |
-// |               |   - is_unstable (bit 25)                       |
-// |               |   - is_migration_target (bit 26)               |
-// |               |   - is_extensible (bit 28)                     |
-// |               |   - may_have_interesting_symbols (bit 28)      |
-// |               |   - construction_counter (bit 29..31)          |
-// |               |                                                |
-// +****************************************************************+
-// | Int           | On systems with 64bit pointer types, there     |
-// |               | is an unused 32bits after bit_field3           |
-// +****************************************************************+
-// | TaggedPointer | [prototype]                                    |
-// +---------------+------------------------------------------------+
-// | TaggedPointer | [constructor_or_backpointer_or_native_context] |
-// +---------------+------------------------------------------------+
-// | TaggedPointer | [instance_descriptors]                         |
-// +****************************************************************+
-// ! TaggedPointer ! [layout_descriptors]                           !
-// !               ! Field is only present if compile-time flag     !
-// !               ! FLAG_unbox_double_fields is enabled            !
-// !               ! (basically on 64 bit architectures)            !
-// +****************************************************************+
-// | TaggedPointer | [dependent_code]                               |
-// +---------------+------------------------------------------------+
-// | TaggedPointer | [prototype_validity_cell]                      |
-// +---------------+------------------------------------------------+
-// | TaggedPointer | If Map is a prototype map:                     |
-// |               |   [prototype_info]                             |
-// |               | Else:                                          |
-// |               |   [raw_transitions]                            |
-// +---------------+------------------------------------------------+
+// +---------------+-------------------------------------------------+
+// |   _ Type _    | _ Description _                                 |
+// +---------------+-------------------------------------------------+
+// | TaggedPointer | map - Always a pointer to the MetaMap root      |
+// +---------------+-------------------------------------------------+
+// | Int           | The first int field                             |
+//  `---+----------+-------------------------------------------------+
+//      | Byte     | [instance_size]                                 |
+//      +----------+-------------------------------------------------+
+//      | Byte     | If Map for a primitive type:                    |
+//      |          |   native context index for constructor fn       |
+//      |          | If Map for an Object type:                      |
+//      |          |   inobject properties start offset in words     |
+//      +----------+-------------------------------------------------+
+//      | Byte     | [used_or_unused_instance_size_in_words]         |
+//      |          | For JSObject in fast mode this byte encodes     |
+//      |          | the size of the object that includes only       |
+//      |          | the used property fields or the slack size      |
+//      |          | in properties backing store.                    |
+//      +----------+-------------------------------------------------+
+//      | Byte     | [visitor_id]                                    |
+// +----+----------+-------------------------------------------------+
+// | Int           | The second int field                            |
+//  `---+----------+-------------------------------------------------+
+//      | Short    | [instance_type]                                 |
+//      +----------+-------------------------------------------------+
+//      | Byte     | [bit_field]                                     |
+//      |          |   - has_non_instance_prototype (bit 0)          |
+//      |          |   - is_callable (bit 1)                         |
+//      |          |   - has_named_interceptor (bit 2)               |
+//      |          |   - has_indexed_interceptor (bit 3)             |
+//      |          |   - is_undetectable (bit 4)                     |
+//      |          |   - is_access_check_needed (bit 5)              |
+//      |          |   - is_constructor (bit 6)                      |
+//      |          |   - has_prototype_slot (bit 7)                  |
+//      +----------+-------------------------------------------------+
+//      | Byte     | [bit_field2]                                    |
+//      |          |   - new_target_is_base (bit 0)                  |
+//      |          |   - is_immutable_proto (bit 1)                  |
+//      |          |   - elements_kind (bits 2..7)                   |
+// +----+----------+-------------------------------------------------+
+// | Int           | [bit_field3]                                    |
+// |               |   - enum_length (bit 0..9)                      |
+// |               |   - number_of_own_descriptors (bit 10..19)      |
+// |               |   - is_prototype_map (bit 20)                   |
+// |               |   - is_dictionary_map (bit 21)                  |
+// |               |   - owns_descriptors (bit 22)                   |
+// |               |   - is_in_retained_map_list (bit 23)            |
+// |               |   - is_deprecated (bit 24)                      |
+// |               |   - is_unstable (bit 25)                        |
+// |               |   - is_migration_target (bit 26)                |
+// |               |   - is_extensible (bit 28)                      |
+// |               |   - may_have_interesting_properties (bit 28)    |
+// |               |   - construction_counter (bit 29..31)           |
+// |               |                                                 |
+// +*****************************************************************+
+// | Int           | On systems with 64bit pointer types, there      |
+// |               | is an unused 32bits after bit_field3            |
+// +*****************************************************************+
+// | TaggedPointer | [prototype]                                     |
+// +---------------+-------------------------------------------------+
+// | TaggedPointer | [constructor_or_back_pointer_or_native_context] |
+// +---------------+-------------------------------------------------+
+// | TaggedPointer | [instance_descriptors]                          |
+// +*****************************************************************+
+// | TaggedPointer | [dependent_code]                                |
+// +---------------+-------------------------------------------------+
+// | TaggedPointer | [prototype_validity_cell]                       |
+// +---------------+-------------------------------------------------+
+// | TaggedPointer | If Map is a prototype map:                      |
+// |               |   [prototype_info]                              |
+// |               | Else:                                           |
+// |               |   [raw_transitions]                             |
+// +---------------+-------------------------------------------------+
 
-class Map : public HeapObject {
+class Map : public TorqueGeneratedMap<Map, HeapObject> {
  public:
   // Instance size.
   // Size in bytes or kVariableSizeSentinel if instances do not have
@@ -224,12 +234,12 @@ class Map : public HeapObject {
   static const int kNoConstructorFunctionIndex = 0;
   inline int GetConstructorFunctionIndex() const;
   inline void SetConstructorFunctionIndex(int value);
-  static MaybeHandle<JSFunction> GetConstructorFunction(
-      Handle<Map> map, Handle<Context> native_context);
+  static base::Optional<JSFunction> GetConstructorFunction(
+      Tagged<Map> map, Tagged<Context> native_context);
 
   // Retrieve interceptors.
-  DECL_GETTER(GetNamedInterceptor, InterceptorInfo)
-  DECL_GETTER(GetIndexedInterceptor, InterceptorInfo)
+  DECL_GETTER(GetNamedInterceptor, Tagged<InterceptorInfo>)
+  DECL_GETTER(GetIndexedInterceptor, Tagged<InterceptorInfo>)
 
   // Instance type.
   DECL_PRIMITIVE_ACCESSORS(instance_type, InstanceType)
@@ -238,6 +248,8 @@ class Map : public HeapObject {
   // (only used for JSObject in fast mode, for the other kinds of objects it
   // is equal to the instance size).
   inline int UsedInstanceSize() const;
+
+  inline bool HasOutOfObjectProperties() const;
 
   // Tells how many unused property fields (in-object or out-of object) are
   // available in the instance (only used for JSObject in fast mode).
@@ -248,8 +260,8 @@ class Map : public HeapObject {
   inline void SetInObjectUnusedPropertyFields(int unused_property_fields);
   // Updates the counters tracking unused fields in the property array.
   inline void SetOutOfObjectUnusedPropertyFields(int unused_property_fields);
-  inline void CopyUnusedPropertyFields(Map map);
-  inline void CopyUnusedPropertyFieldsAdjustedForInstanceSize(Map map);
+  inline void CopyUnusedPropertyFields(Tagged<Map> map);
+  inline void CopyUnusedPropertyFieldsAdjustedForInstanceSize(Tagged<Map> map);
   inline void AccountAddedPropertyField();
   inline void AccountAddedOutOfObjectPropertyField(
       int unused_in_property_array);
@@ -257,9 +269,14 @@ class Map : public HeapObject {
   //
   // Bit field.
   //
-  DECL_PRIMITIVE_ACCESSORS(bit_field, byte)
-  // Atomic accessors, used for whitelisting legitimate concurrent accesses.
-  DECL_PRIMITIVE_ACCESSORS(relaxed_bit_field, byte)
+  // The setter in this pair calls the relaxed setter if concurrent marking is
+  // on, or performs the write non-atomically if it's off. The read is always
+  // non-atomically. This is done to have wider TSAN coverage on the cases where
+  // it's possible.
+  DECL_PRIMITIVE_ACCESSORS(bit_field, uint8_t)
+
+  // Atomic accessors, used for allowlisting legitimate concurrent accesses.
+  DECL_PRIMITIVE_ACCESSORS(relaxed_bit_field, uint8_t)
 
   // Bit positions for |bit_field|.
   struct Bits1 {
@@ -269,7 +286,7 @@ class Map : public HeapObject {
   //
   // Bit field 2.
   //
-  DECL_PRIMITIVE_ACCESSORS(bit_field2, byte)
+  DECL_PRIMITIVE_ACCESSORS(bit_field2, uint8_t)
 
   // Bit positions for |bit_field2|.
   struct Bits2 {
@@ -279,7 +296,13 @@ class Map : public HeapObject {
   //
   // Bit field 3.
   //
+  // {bit_field3} calls the relaxed accessors if concurrent marking is on, or
+  // performs the read/write non-atomically if it's off. This is done to have
+  // wider TSAN coverage on the cases where it's possible.
   DECL_PRIMITIVE_ACCESSORS(bit_field3, uint32_t)
+
+  DECL_PRIMITIVE_ACCESSORS(relaxed_bit_field3, uint32_t)
+  DECL_PRIMITIVE_ACCESSORS(release_acquire_bit_field3, uint32_t)
 
   // Clear uninitialized padding space. This ensures that the snapshot content
   // is deterministic. Depending on the V8 build mode there could be no padding.
@@ -291,17 +314,17 @@ class Map : public HeapObject {
   };
 
   // Ensure that Torque-defined bit widths for |bit_field3| are as expected.
-  STATIC_ASSERT(Bits3::EnumLengthBits::kSize == kDescriptorIndexBitCount);
-  STATIC_ASSERT(Bits3::NumberOfOwnDescriptorsBits::kSize ==
+  static_assert(Bits3::EnumLengthBits::kSize == kDescriptorIndexBitCount);
+  static_assert(Bits3::NumberOfOwnDescriptorsBits::kSize ==
                 kDescriptorIndexBitCount);
 
-  STATIC_ASSERT(Bits3::NumberOfOwnDescriptorsBits::kMax >=
+  static_assert(Bits3::NumberOfOwnDescriptorsBits::kMax >=
                 kMaxNumberOfDescriptors);
 
   static const int kSlackTrackingCounterStart = 7;
   static const int kSlackTrackingCounterEnd = 1;
   static const int kNoSlackTracking = 0;
-  STATIC_ASSERT(kSlackTrackingCounterStart <=
+  static_assert(kSlackTrackingCounterStart <=
                 Bits3::ConstructionCounterBits::kMax);
 
   // Inobject slack tracking is the way to reclaim unused inobject space.
@@ -351,10 +374,6 @@ class Map : public HeapObject {
   int ComputeMinObjectSlack(Isolate* isolate);
   inline int InstanceSizeFromSlack(int slack) const;
 
-  // Completes inobject slack tracking for the transition tree starting at this
-  // initial map.
-  V8_EXPORT_PRIVATE void CompleteInobjectSlackTracking(Isolate* isolate);
-
   // Tells whether the object in the prototype property will be used
   // for instances created from this function.  If the prototype
   // property is set to a value that is not a JSObject, the prototype
@@ -368,9 +387,9 @@ class Map : public HeapObject {
 
   // Tells whether the instance with this map may have properties for
   // interesting symbols on it.
-  // An "interesting symbol" is one for which Name::IsInterestingSymbol()
+  // An "interesting symbol" is one for which Name::IsInteresting()
   // returns true, i.e. a well-known symbol like @@toStringTag.
-  DECL_BOOLEAN_ACCESSORS(may_have_interesting_symbols)
+  DECL_BOOLEAN_ACCESSORS(may_have_interesting_properties)
 
   DECL_BOOLEAN_ACCESSORS(has_prototype_slot)
 
@@ -396,6 +415,8 @@ class Map : public HeapObject {
   DECL_BOOLEAN_ACCESSORS(is_extensible)
   DECL_BOOLEAN_ACCESSORS(is_prototype_map)
   inline bool is_abandoned_prototype_map() const;
+  inline bool has_prototype_info() const;
+  inline bool TryGetPrototypeInfo(Tagged<PrototypeInfo>* result) const;
 
   // Whether the instance has been added to the retained map list by
   // Heap::AddRetainedMap.
@@ -411,36 +432,44 @@ class Map : public HeapObject {
   inline bool has_fast_smi_or_object_elements() const;
   inline bool has_fast_double_elements() const;
   inline bool has_fast_elements() const;
+  inline bool has_fast_packed_elements() const;
   inline bool has_sloppy_arguments_elements() const;
   inline bool has_fast_sloppy_arguments_elements() const;
   inline bool has_fast_string_wrapper_elements() const;
-  inline bool has_typed_array_elements() const;
+  inline bool has_typed_array_or_rab_gsab_typed_array_elements() const;
+  inline bool has_any_typed_array_or_wasm_array_elements() const;
   inline bool has_dictionary_elements() const;
   inline bool has_any_nonextensible_elements() const;
   inline bool has_nonextensible_elements() const;
   inline bool has_sealed_elements() const;
   inline bool has_frozen_elements() const;
+  inline bool has_shared_array_elements() const;
 
   // Weakly checks whether a map is detached from all transition trees. If this
   // returns true, the map is guaranteed to be detached. If it returns false,
   // there is no guarantee it is attached.
   inline bool IsDetached(Isolate* isolate) const;
 
-  // Returns true if the current map doesn't have DICTIONARY_ELEMENTS but if a
-  // map with DICTIONARY_ELEMENTS was found in the prototype chain.
-  bool DictionaryElementsInPrototypeChainOnly(Isolate* isolate);
+  // Returns true if there is an object with potentially read-only elements
+  // in the prototype chain. It could be a Proxy, a string wrapper,
+  // an object with DICTIONARY_ELEMENTS potentially containing read-only
+  // elements or an object with any frozen elements, or a slow arguments object.
+  bool MayHaveReadOnlyElementsInPrototypeChain(Isolate* isolate);
 
-  inline Map ElementsTransitionMap(Isolate* isolate);
+  inline Tagged<Map> ElementsTransitionMap(Isolate* isolate,
+                                           ConcurrencyMode cmode);
 
-  inline FixedArrayBase GetInitialElements() const;
+  inline Tagged<FixedArrayBase> GetInitialElements() const;
 
   // [raw_transitions]: Provides access to the transitions storage field.
   // Don't call set_raw_transitions() directly to overwrite transitions, use
   // the TransitionArray::ReplaceTransitions() wrapper instead!
   DECL_ACCESSORS(raw_transitions, MaybeObject)
+  DECL_RELEASE_ACQUIRE_WEAK_ACCESSORS(raw_transitions)
   // [prototype_info]: Per-prototype metadata. Aliased with transitions
   // (which prototype maps don't have).
-  DECL_ACCESSORS(prototype_info, Object)
+  DECL_GETTER(prototype_info, Tagged<Object>)
+  DECL_RELEASE_ACQUIRE_ACCESSORS(prototype_info, Tagged<Object>)
   // PrototypeInfo is created lazily using this helper (which installs it on
   // the given prototype's map).
   static Handle<PrototypeInfo> GetOrCreatePrototypeInfo(
@@ -462,14 +491,14 @@ class Map : public HeapObject {
   static const int kPrototypeChainValid = 0;
   static const int kPrototypeChainInvalid = 1;
 
-  static bool IsPrototypeChainInvalidated(Map map);
+  static bool IsPrototypeChainInvalidated(Tagged<Map> map);
 
   // Return the map of the root of object's prototype chain.
-  Map GetPrototypeChainRootMap(Isolate* isolate) const;
+  Tagged<Map> GetPrototypeChainRootMap(Isolate* isolate) const;
 
-  V8_EXPORT_PRIVATE Map FindRootMap(Isolate* isolate) const;
-  V8_EXPORT_PRIVATE Map FindFieldOwner(Isolate* isolate,
-                                       InternalIndex descriptor) const;
+  V8_EXPORT_PRIVATE Tagged<Map> FindRootMap(PtrComprCageBase cage_base) const;
+  V8_EXPORT_PRIVATE Tagged<Map> FindFieldOwner(PtrComprCageBase cage_base,
+                                               InternalIndex descriptor) const;
 
   inline int GetInObjectPropertyOffset(int index) const;
 
@@ -489,37 +518,20 @@ class Map : public HeapObject {
   };
 
   FieldCounts GetFieldCounts() const;
-  int NumberOfFields() const;
-
-  bool HasOutOfObjectProperties() const;
-
-  // Returns true if transition to the given map requires special
-  // synchronization with the concurrent marker.
-  bool TransitionRequiresSynchronizationWithGC(Map target) const;
-  // Returns true if transition to the given map removes a tagged in-object
-  // field.
-  bool TransitionRemovesTaggedField(Map target) const;
-  // Returns true if transition to the given map replaces a tagged in-object
-  // field with an untagged in-object field.
-  bool TransitionChangesTaggedFieldToUntaggedField(Map target) const;
+  int NumberOfFields(ConcurrencyMode cmode) const;
 
   // TODO(ishell): candidate with JSObject::MigrateToMap().
-  bool InstancesNeedRewriting(Map target) const;
-  bool InstancesNeedRewriting(Map target, int target_number_of_fields,
+  bool InstancesNeedRewriting(Tagged<Map> target, ConcurrencyMode cmode) const;
+  bool InstancesNeedRewriting(Tagged<Map> target, int target_number_of_fields,
                               int target_inobject, int target_unused,
-                              int* old_number_of_fields) const;
-  V8_WARN_UNUSED_RESULT static Handle<FieldType> GeneralizeFieldType(
-      Representation rep1, Handle<FieldType> type1, Representation rep2,
-      Handle<FieldType> type2, Isolate* isolate);
-  static void GeneralizeField(Isolate* isolate, Handle<Map> map,
-                              InternalIndex modify_index,
-                              PropertyConstness new_constness,
-                              Representation new_representation,
-                              Handle<FieldType> new_field_type);
+                              int* old_number_of_fields,
+                              ConcurrencyMode cmode) const;
   // Returns true if the |field_type| is the most general one for
   // given |representation|.
   static inline bool IsMostGeneralFieldType(Representation representation,
-                                            FieldType field_type);
+                                            Tagged<FieldType> field_type);
+  static inline bool FieldTypeIsCleared(Representation rep,
+                                        Tagged<FieldType> type);
 
   // Generalizes representation and field_type if objects with given
   // instance type can have fast elements that can be transitioned by
@@ -532,23 +544,21 @@ class Map : public HeapObject {
       Isolate* isolate, InstanceType instance_type,
       Representation* representation, Handle<FieldType>* field_type);
 
-  V8_EXPORT_PRIVATE static Handle<Map> ReconfigureProperty(
-      Isolate* isolate, Handle<Map> map, InternalIndex modify_index,
-      PropertyKind new_kind, PropertyAttributes new_attributes,
-      Representation new_representation, Handle<FieldType> new_field_type);
-
-  V8_EXPORT_PRIVATE static Handle<Map> ReconfigureElementsKind(
-      Isolate* isolate, Handle<Map> map, ElementsKind new_elements_kind);
-
   V8_EXPORT_PRIVATE static Handle<Map> PrepareForDataProperty(
       Isolate* isolate, Handle<Map> old_map, InternalIndex descriptor_number,
       PropertyConstness constness, Handle<Object> value);
 
+  V8_EXPORT_PRIVATE static Handle<Map> Normalize(
+      Isolate* isolate, Handle<Map> map, ElementsKind new_elements_kind,
+      PropertyNormalizationMode mode, bool use_cache, const char* reason);
   V8_EXPORT_PRIVATE static Handle<Map> Normalize(Isolate* isolate,
                                                  Handle<Map> map,
                                                  ElementsKind new_elements_kind,
                                                  PropertyNormalizationMode mode,
-                                                 const char* reason);
+                                                 const char* reason) {
+    const bool kUseCache = true;
+    return Normalize(isolate, map, new_elements_kind, mode, kUseCache, reason);
+  }
 
   inline static Handle<Map> Normalize(Isolate* isolate, Handle<Map> fast_map,
                                       PropertyNormalizationMode mode,
@@ -565,11 +575,16 @@ class Map : public HeapObject {
   DECL_BOOLEAN_ACCESSORS(is_access_check_needed)
 
   // [prototype]: implicit prototype object.
-  DECL_ACCESSORS(prototype, HeapObject)
+  DECL_ACCESSORS(prototype, Tagged<HeapObject>)
   // TODO(jkummerow): make set_prototype private.
   V8_EXPORT_PRIVATE static void SetPrototype(
       Isolate* isolate, Handle<Map> map, Handle<HeapObject> prototype,
       bool enable_prototype_setup_mode = true);
+
+  // Sets prototype and constructor fields to null. Can be called during
+  // bootstrapping.
+  inline void init_prototype_and_constructor_or_back_pointer(
+      ReadOnlyRoots roots);
 
   // [constructor]: points back to the function or FunctionTemplateInfo
   // responsible for this map.
@@ -578,49 +593,59 @@ class Map : public HeapObject {
   // back pointer chain until they find the map holding their constructor.
   // Returns null_value if there's neither a constructor function nor a
   // FunctionTemplateInfo available.
-  // The field also overlaps with the native context pointer for context maps.
-  DECL_ACCESSORS(constructor_or_backpointer, Object)
-  DECL_ACCESSORS(native_context, NativeContext)
-  DECL_GETTER(GetConstructor, Object)
-  DECL_GETTER(GetFunctionTemplateInfo, FunctionTemplateInfo)
-  inline void SetConstructor(Object constructor,
+  // The field also overlaps with the native context pointer for context maps,
+  // and with the Wasm type info for WebAssembly object maps.
+  DECL_ACCESSORS(constructor_or_back_pointer, Tagged<Object>)
+  DECL_RELAXED_ACCESSORS(constructor_or_back_pointer, Tagged<Object>)
+  DECL_ACCESSORS(native_context, Tagged<NativeContext>)
+  DECL_ACCESSORS(native_context_or_null, Tagged<Object>)
+  DECL_ACCESSORS(wasm_type_info, Tagged<WasmTypeInfo>)
+
+  // Gets |constructor_or_back_pointer| field value from the root map.
+  // The result might be null, JSFunction, FunctionTemplateInfo or a Tuple2
+  // for JSFunctions with non-instance prototypes.
+  DECL_GETTER(GetConstructorRaw, Tagged<Object>)
+
+  // Gets constructor value from the root map. Unwraps Tuple2 in case of
+  // JSFunction map with non-instance prototype.
+  // The result returned might be null, JSFunction or FunctionTemplateInfo.
+  DECL_GETTER(GetConstructor, Tagged<Object>)
+  DECL_GETTER(GetFunctionTemplateInfo, Tagged<FunctionTemplateInfo>)
+  inline void SetConstructor(Tagged<Object> constructor,
                              WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
   // Constructor getter that performs at most the given number of steps
   // in the transition tree. Returns either the constructor or the map at
   // which the walk has stopped.
-  inline Object TryGetConstructor(Isolate* isolate, int max_steps);
+  inline Tagged<Object> TryGetConstructor(Isolate* isolate, int max_steps);
+
+  // Gets non-instance prototype value which is stored in Tuple2 in a
+  // root map's |constructor_or_back_pointer| field.
+  DECL_GETTER(GetNonInstancePrototype, Tagged<Object>)
+
   // [back pointer]: points back to the parent map from which a transition
   // leads to this map. The field overlaps with the constructor (see above).
-  DECL_GETTER(GetBackPointer, HeapObject)
-  inline void SetBackPointer(HeapObject value,
+  DECL_GETTER(GetBackPointer, Tagged<HeapObject>)
+  inline void SetBackPointer(Tagged<HeapObject> value,
                              WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+  inline bool TryGetBackPointer(PtrComprCageBase cage_base,
+                                Tagged<Map>* back_pointer) const;
 
   // [instance descriptors]: describes the object.
-  DECL_GETTER(instance_descriptors, DescriptorArray)
-  V8_EXPORT_PRIVATE void SetInstanceDescriptors(Isolate* isolate,
-                                                DescriptorArray descriptors,
-                                                int number_of_own_descriptors);
+  DECL_ACCESSORS(instance_descriptors, Tagged<DescriptorArray>)
+  DECL_RELAXED_ACCESSORS(instance_descriptors, Tagged<DescriptorArray>)
+  DECL_ACQUIRE_GETTER(instance_descriptors, Tagged<DescriptorArray>)
+  V8_EXPORT_PRIVATE void SetInstanceDescriptors(
+      Isolate* isolate, Tagged<DescriptorArray> descriptors,
+      int number_of_own_descriptors);
 
-  // [layout descriptor]: describes the object layout.
-  DECL_ACCESSORS(layout_descriptor, LayoutDescriptor)
-  // |layout descriptor| accessor which can be used from GC.
-  inline LayoutDescriptor layout_descriptor_gc_safe() const;
-  inline bool HasFastPointerLayout() const;
-
-  // |layout descriptor| accessor that is safe to call even when
-  // FLAG_unbox_double_fields is disabled (in this case Map does not contain
-  // |layout_descriptor| field at all).
-  inline LayoutDescriptor GetLayoutDescriptor() const;
-
-  inline void UpdateDescriptors(Isolate* isolate, DescriptorArray descriptors,
-                                LayoutDescriptor layout_descriptor,
+  inline void UpdateDescriptors(Isolate* isolate,
+                                Tagged<DescriptorArray> descriptors,
                                 int number_of_own_descriptors);
   inline void InitializeDescriptors(Isolate* isolate,
-                                    DescriptorArray descriptors,
-                                    LayoutDescriptor layout_descriptor);
+                                    Tagged<DescriptorArray> descriptors);
 
   // [dependent code]: list of optimized codes that weakly embed this map.
-  DECL_ACCESSORS(dependent_code, DependentCode)
+  DECL_ACCESSORS(dependent_code, Tagged<DependentCode>)
 
   // [prototype_validity_cell]: Cell containing the validity bit for prototype
   // chains or Smi(0) if uninitialized.
@@ -634,12 +659,13 @@ class Map : public HeapObject {
   // For non-prototype maps which are used as transitioning store handlers this
   // field contains the validity cell which guards modifications of this map's
   // prototype.
-  DECL_ACCESSORS(prototype_validity_cell, Object)
+  DECL_RELAXED_ACCESSORS(prototype_validity_cell, Tagged<Object>)
 
   // Returns true if prototype validity cell value represents "valid" prototype
   // chain state.
   inline bool IsPrototypeValidityCellValid() const;
 
+  inline Tagged<Name> GetLastDescriptorName(Isolate* isolate) const;
   inline PropertyDetails GetLastDescriptorDetails(Isolate* isolate) const;
 
   inline InternalIndex LastAdded() const;
@@ -648,7 +674,7 @@ class Map : public HeapObject {
   inline void SetNumberOfOwnDescriptors(int number);
   inline InternalIndex::Range IterateOwnDescriptors() const;
 
-  inline Cell RetrieveDescriptorsPointer();
+  inline Tagged<Cell> RetrieveDescriptorsPointer();
 
   // Checks whether all properties are stored either in the map or on the object
   // (inobject, properties, or elements backing store), requiring no special
@@ -677,6 +703,7 @@ class Map : public HeapObject {
 
   DECL_BOOLEAN_ACCESSORS(is_deprecated)
   inline bool CanBeDeprecated() const;
+
   // Returns a non-deprecated version of the input. If the input was not
   // deprecated, it is directly returned. Otherwise, the non-deprecated version
   // is found by re-transitioning from the root of the transition tree using the
@@ -684,8 +711,6 @@ class Map : public HeapObject {
   // is found.
   V8_EXPORT_PRIVATE static MaybeHandle<Map> TryUpdate(
       Isolate* isolate, Handle<Map> map) V8_WARN_UNUSED_RESULT;
-  V8_EXPORT_PRIVATE static Map TryUpdateSlow(Isolate* isolate,
-                                             Map map) V8_WARN_UNUSED_RESULT;
 
   // Returns a non-deprecated version of the input. This method may deprecate
   // existing maps along the way if encodings conflict. Not for use while
@@ -707,7 +732,8 @@ class Map : public HeapObject {
 
   static MaybeObjectHandle WrapFieldType(Isolate* isolate,
                                          Handle<FieldType> type);
-  V8_EXPORT_PRIVATE static FieldType UnwrapFieldType(MaybeObject wrapped_type);
+  V8_EXPORT_PRIVATE static Tagged<FieldType> UnwrapFieldType(
+      MaybeObject wrapped_type);
 
   V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT static MaybeHandle<Map> CopyWithField(
       Isolate* isolate, Handle<Map> map, Handle<Name> name,
@@ -725,6 +751,10 @@ class Map : public HeapObject {
   static Handle<Map> TransitionElementsTo(Isolate* isolate, Handle<Map> map,
                                           ElementsKind to_kind);
 
+  static base::Optional<Map> TryAsElementsKind(Isolate* isolate,
+                                               Handle<Map> map,
+                                               ElementsKind kind,
+                                               ConcurrencyMode cmode);
   V8_EXPORT_PRIVATE static Handle<Map> AsElementsKind(Isolate* isolate,
                                                       Handle<Map> map,
                                                       ElementsKind kind);
@@ -752,10 +782,6 @@ class Map : public HeapObject {
       Isolate* isolate, Handle<Map> map, Handle<Name> name,
       InternalIndex descriptor, Handle<Object> getter, Handle<Object> setter,
       PropertyAttributes attributes);
-  V8_EXPORT_PRIVATE static Handle<Map> ReconfigureExistingProperty(
-      Isolate* isolate, Handle<Map> map, InternalIndex descriptor,
-      PropertyKind kind, PropertyAttributes attributes,
-      PropertyConstness constness);
 
   inline void AppendDescriptor(Isolate* isolate, Descriptor* desc);
 
@@ -778,8 +804,6 @@ class Map : public HeapObject {
   // Returns the number of enumerable properties.
   int NumberOfEnumerableProperties() const;
 
-  DECL_CAST(Map)
-
   static inline int SlackForArraySize(int old_size, int size_limit);
 
   V8_EXPORT_PRIVATE static void EnsureDescriptorSlack(Isolate* isolate,
@@ -791,32 +815,32 @@ class Map : public HeapObject {
   static Handle<Map> GetObjectCreateMap(Isolate* isolate,
                                         Handle<HeapObject> prototype);
 
-  // Similar to {GetObjectCreateMap} but does not transition {prototype} and
-  // fails gracefully by returning an empty handle instead.
-  static MaybeHandle<Map> TryGetObjectCreateMap(Isolate* isolate,
-                                                Handle<HeapObject> prototype);
-
   // Computes a hash value for this map, to be used in HashTables and such.
   int Hash();
 
   // Returns the transitioned map for this map with the most generic
   // elements_kind that's found in |candidates|, or |nullptr| if no match is
   // found at all.
-  V8_EXPORT_PRIVATE Map FindElementsKindTransitionedMap(
-      Isolate* isolate, MapHandles const& candidates);
+  V8_EXPORT_PRIVATE Tagged<Map> FindElementsKindTransitionedMap(
+      Isolate* isolate, MapHandles const& candidates, ConcurrencyMode cmode);
 
   inline bool CanTransition() const;
 
-  static Map GetInstanceTypeMap(ReadOnlyRoots roots, InstanceType type);
-
-#define DECL_TESTER(Type, ...) inline bool Is##Type##Map() const;
-  INSTANCE_TYPE_CHECKERS(DECL_TESTER)
-#undef DECL_TESTER
-  inline bool IsBooleanMap() const;
-  inline bool IsNullOrUndefinedMap() const;
-  inline bool IsPrimitiveMap() const;
-  inline bool IsSpecialReceiverMap() const;
-  inline bool IsCustomElementsReceiverMap() const;
+  static constexpr base::Optional<RootIndex> TryGetMapRootIdxFor(
+      InstanceType type) {
+    switch (type) {
+#define MAKE_CASE(TYPE, Name, name) \
+  case TYPE:                        \
+    return RootIndex::k##Name##Map;
+      STRUCT_LIST(MAKE_CASE)
+      TORQUE_DEFINED_INSTANCE_TYPE_LIST(MAKE_CASE)
+#undef MAKE_CASE
+      default:
+        break;
+    }
+    return {};
+  }
+  static inline Tagged<Map> GetMapFor(ReadOnlyRoots roots, InstanceType type);
 
   bool IsMapInArrayPrototypeChain(Isolate* isolate) const;
 
@@ -830,7 +854,7 @@ class Map : public HeapObject {
 
   DECL_PRIMITIVE_ACCESSORS(visitor_id, VisitorId)
 
-  static ObjectFields ObjectFieldsFrom(VisitorId visitor_id) {
+  static constexpr ObjectFields ObjectFieldsFrom(VisitorId visitor_id) {
     return (visitor_id < kDataOnlyVisitorIdCount)
                ? ObjectFields::kDataOnly
                : ObjectFields::kMaybePointers;
@@ -844,10 +868,7 @@ class Map : public HeapObject {
 
   static const int kMaxPreAllocatedPropertyFields = 255;
 
-  DEFINE_FIELD_OFFSET_CONSTANTS(HeapObject::kHeaderSize,
-                                TORQUE_GENERATED_MAP_FIELDS)
-
-  STATIC_ASSERT(kInstanceTypeOffset == Internals::kMapInstanceTypeOffset);
+  static_assert(kInstanceTypeOffset == Internals::kMapInstanceTypeOffset);
 
   class BodyDescriptor;
 
@@ -856,29 +877,24 @@ class Map : public HeapObject {
   // If |mode| is set to CLEAR_INOBJECT_PROPERTIES, |other| is treated as if
   // it had exactly zero inobject properties.
   // The "shared" flags of both this map and |other| are ignored.
-  bool EquivalentToForNormalization(const Map other, ElementsKind elements_kind,
+  bool EquivalentToForNormalization(const Tagged<Map> other,
+                                    ElementsKind elements_kind,
                                     PropertyNormalizationMode mode) const;
   inline bool EquivalentToForNormalization(
-      const Map other, PropertyNormalizationMode mode) const;
-
-  // Returns true if given field is unboxed double.
-  inline bool IsUnboxedDoubleField(FieldIndex index) const;
-  inline bool IsUnboxedDoubleField(const Isolate* isolate,
-                                   FieldIndex index) const;
+      const Tagged<Map> other, PropertyNormalizationMode mode) const;
 
   void PrintMapDetails(std::ostream& os);
 
   static inline Handle<Map> AddMissingTransitionsForTesting(
       Isolate* isolate, Handle<Map> split_map,
-      Handle<DescriptorArray> descriptors,
-      Handle<LayoutDescriptor> full_layout_descriptor);
+      Handle<DescriptorArray> descriptors);
 
   // Fires when the layout of an object with a leaf map changes.
   // This includes adding transitions to the leaf map or changing
   // the descriptor array.
   inline void NotifyLeafMapLayoutChange(Isolate* isolate);
 
-  V8_EXPORT_PRIVATE static VisitorId GetVisitorId(Map map);
+  V8_EXPORT_PRIVATE static VisitorId GetVisitorId(Tagged<Map> map);
 
   // Returns true if objects with given instance type are allowed to have
   // fast transitionable elements kinds. This predicate is used to ensure
@@ -889,6 +905,12 @@ class Map : public HeapObject {
   static inline bool CanHaveFastTransitionableElementsKind(
       InstanceType instance_type);
   inline bool CanHaveFastTransitionableElementsKind() const;
+
+  // Maps for Wasm objects can use certain fields for other purposes.
+  inline uint8_t WasmByte1() const;
+  inline uint8_t WasmByte2() const;
+  inline void SetWasmByte1(uint8_t value);
+  inline void SetWasmByte2(uint8_t value);
 
  private:
   // This byte encodes either the instance size without the in-object slack or
@@ -906,41 +928,46 @@ class Map : public HeapObject {
 
   // Returns the map that this (root) map transitions to if its elements_kind
   // is changed to |elements_kind|, or |nullptr| if no such map is cached yet.
-  Map LookupElementsTransitionMap(Isolate* isolate, ElementsKind elements_kind);
+  Tagged<Map> LookupElementsTransitionMap(Isolate* isolate,
+                                          ElementsKind elements_kind,
+                                          ConcurrencyMode cmode);
 
   // Tries to replay property transitions starting from this (root) map using
   // the descriptor array of the |map|. The |root_map| is expected to have
   // proper elements kind and therefore elements kinds transitions are not
   // taken by this function. Returns |nullptr| if matching transition map is
   // not found.
-  Map TryReplayPropertyTransitions(Isolate* isolate, Map map);
+  Tagged<Map> TryReplayPropertyTransitions(Isolate* isolate, Tagged<Map> map,
+                                           ConcurrencyMode cmode);
 
   static void ConnectTransition(Isolate* isolate, Handle<Map> parent,
                                 Handle<Map> child, Handle<Name> name,
                                 SimpleTransitionFlag flag);
 
-  bool EquivalentToForTransition(const Map other) const;
-  bool EquivalentToForElementsKindTransition(const Map other) const;
+  bool EquivalentToForTransition(const Tagged<Map> other,
+                                 ConcurrencyMode cmode) const;
+  bool EquivalentToForElementsKindTransition(const Tagged<Map> other,
+                                             ConcurrencyMode cmode) const;
   static Handle<Map> RawCopy(Isolate* isolate, Handle<Map> map,
                              int instance_size, int inobject_properties);
   static Handle<Map> ShareDescriptor(Isolate* isolate, Handle<Map> map,
                                      Handle<DescriptorArray> descriptors,
                                      Descriptor* descriptor);
   V8_EXPORT_PRIVATE static Handle<Map> AddMissingTransitions(
-      Isolate* isolate, Handle<Map> map, Handle<DescriptorArray> descriptors,
-      Handle<LayoutDescriptor> full_layout_descriptor);
-  static void InstallDescriptors(
-      Isolate* isolate, Handle<Map> parent_map, Handle<Map> child_map,
-      InternalIndex new_descriptor, Handle<DescriptorArray> descriptors,
-      Handle<LayoutDescriptor> full_layout_descriptor);
+      Isolate* isolate, Handle<Map> map, Handle<DescriptorArray> descriptors);
+  static void InstallDescriptors(Isolate* isolate, Handle<Map> parent_map,
+                                 Handle<Map> child_map,
+                                 InternalIndex new_descriptor,
+                                 Handle<DescriptorArray> descriptors);
   static Handle<Map> CopyAddDescriptor(Isolate* isolate, Handle<Map> map,
                                        Descriptor* descriptor,
                                        TransitionFlag flag);
-  static Handle<Map> CopyReplaceDescriptors(
-      Isolate* isolate, Handle<Map> map, Handle<DescriptorArray> descriptors,
-      Handle<LayoutDescriptor> layout_descriptor, TransitionFlag flag,
-      MaybeHandle<Name> maybe_name, const char* reason,
-      SimpleTransitionFlag simple_flag);
+  static Handle<Map> CopyReplaceDescriptors(Isolate* isolate, Handle<Map> map,
+                                            Handle<DescriptorArray> descriptors,
+                                            TransitionFlag flag,
+                                            MaybeHandle<Name> maybe_name,
+                                            const char* reason,
+                                            SimpleTransitionFlag simple_flag);
 
   static Handle<Map> CopyReplaceDescriptor(Isolate* isolate, Handle<Map> map,
                                            Handle<DescriptorArray> descriptors,
@@ -952,42 +979,29 @@ class Map : public HeapObject {
 
   void DeprecateTransitionTree(Isolate* isolate);
 
-  void ReplaceDescriptors(Isolate* isolate, DescriptorArray new_descriptors,
-                          LayoutDescriptor new_layout_descriptor);
+  void ReplaceDescriptors(Isolate* isolate,
+                          Tagged<DescriptorArray> new_descriptors);
 
-  // Update field type of the given descriptor to new representation and new
-  // type. The type must be prepared for storing in descriptor array:
-  // it must be either a simple type or a map wrapped in a weak cell.
-  void UpdateFieldType(Isolate* isolate, InternalIndex descriptor_number,
-                       Handle<Name> name, PropertyConstness new_constness,
-                       Representation new_representation,
-                       const MaybeObjectHandle& new_wrapped_type);
-
-  // TODO(ishell): Move to MapUpdater.
-  void PrintReconfiguration(Isolate* isolate, FILE* file,
-                            InternalIndex modify_index, PropertyKind kind,
-                            PropertyAttributes attributes);
-  // TODO(ishell): Move to MapUpdater.
-  void PrintGeneralization(
-      Isolate* isolate, FILE* file, const char* reason,
-      InternalIndex modify_index, int split, int descriptors,
-      bool constant_to_field, Representation old_representation,
-      Representation new_representation, PropertyConstness old_constness,
-      PropertyConstness new_constness, MaybeHandle<FieldType> old_field_type,
-      MaybeHandle<Object> old_value, MaybeHandle<FieldType> new_field_type,
-      MaybeHandle<Object> new_value);
+  // This is the equivalent of IsMap() but avoids reading the instance type so
+  // it can be used concurrently without acquire load.
+  V8_INLINE bool ConcurrentIsMap(PtrComprCageBase cage_base,
+                                 const Object& object) const;
 
   // Use the high-level instance_descriptors/SetInstanceDescriptors instead.
-  DECL_ACCESSORS(synchronized_instance_descriptors, DescriptorArray)
+  DECL_RELEASE_SETTER(instance_descriptors, Tagged<DescriptorArray>)
+
+  // Hide inherited accessors from the generated superclass.
+  DECL_ACCESSORS(constructor_or_back_pointer_or_native_context, Tagged<Object>)
+  DECL_ACCESSORS(transitions_or_prototype_info, Tagged<Object>)
 
   static const int kFastPropertiesSoftLimit = 12;
   static const int kMaxFastProperties = 128;
 
   friend class MapUpdater;
-  template <typename ConcreteVisitor, typename MarkingState>
+  template <typename ConcreteVisitor>
   friend class MarkingVisitorBase;
 
-  OBJECT_CONSTRUCTORS(Map, HeapObject);
+  TQ_OBJECT_CONSTRUCTORS(Map)
 };
 
 // The cache for maps used by normalized (dictionary mode) objects.
@@ -1007,18 +1021,28 @@ class NormalizedMapCache : public WeakFixedArray {
   DECL_VERIFIER(NormalizedMapCache)
 
  private:
-  friend bool HeapObject::IsNormalizedMapCache(const Isolate* isolate) const;
+  friend bool IsNormalizedMapCache(Tagged<HeapObject> obj,
+                                   PtrComprCageBase cage_base);
 
   static const int kEntries = 64;
 
   static inline int GetIndex(Handle<Map> map);
 
   // The following declarations hide base class methods.
-  Object get(int index);
-  void set(int index, Object value);
+  Tagged<Object> get(int index);
+  void set(int index, Tagged<Object> value);
 
   OBJECT_CONSTRUCTORS(NormalizedMapCache, WeakFixedArray);
 };
+
+#define DECL_TESTER(Type, ...) inline bool Is##Type##Map(Tagged<Map> map);
+INSTANCE_TYPE_CHECKERS(DECL_TESTER)
+#undef DECL_TESTER
+inline bool IsBooleanMap(Tagged<Map> map);
+inline bool IsNullOrUndefinedMap(Tagged<Map> map);
+inline bool IsPrimitiveMap(Tagged<Map> map);
+inline bool IsSpecialReceiverMap(Tagged<Map> map);
+inline bool IsCustomElementsReceiverMap(Tagged<Map> map);
 
 }  // namespace internal
 }  // namespace v8

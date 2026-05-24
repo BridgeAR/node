@@ -3,7 +3,7 @@
 .type	_aesni_ctr32_ghash_6x,@function
 .align	32
 _aesni_ctr32_ghash_6x:
-.cfi_startproc
+.cfi_startproc	
 	vmovdqu	32(%r11),%xmm2
 	subq	$6,%rdx
 	vpxor	%xmm4,%xmm4,%xmm4
@@ -311,7 +311,7 @@ _aesni_ctr32_ghash_6x:
 	vpxor	%xmm4,%xmm8,%xmm8
 
 	.byte	0xf3,0xc3
-.cfi_endproc
+.cfi_endproc	
 .size	_aesni_ctr32_ghash_6x,.-_aesni_ctr32_ghash_6x
 .globl	aesni_gcm_decrypt
 .type	aesni_gcm_decrypt,@function
@@ -418,7 +418,7 @@ aesni_gcm_decrypt:
 .type	_aesni_ctr32_6x,@function
 .align	32
 _aesni_ctr32_6x:
-.cfi_startproc
+.cfi_startproc	
 	vmovdqu	0-128(%rcx),%xmm4
 	vmovdqu	32(%r11),%xmm2
 	leaq	-1(%rbp),%r13
@@ -505,7 +505,7 @@ _aesni_ctr32_6x:
 	vpshufb	%xmm0,%xmm1,%xmm1
 	vpxor	%xmm4,%xmm14,%xmm14
 	jmp	.Loop_ctr32
-.cfi_endproc
+.cfi_endproc	
 .size	_aesni_ctr32_6x,.-_aesni_ctr32_6x
 
 .globl	aesni_gcm_encrypt
@@ -787,3 +787,24 @@ aesni_gcm_encrypt:
 .byte	1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 .byte	65,69,83,45,78,73,32,71,67,77,32,109,111,100,117,108,101,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
 .align	64
+	.section ".note.gnu.property", "a"
+	.p2align 3
+	.long 1f - 0f
+	.long 4f - 1f
+	.long 5
+0:
+	# "GNU" encoded with .byte, since .asciz isn't supported
+	# on Solaris.
+	.byte 0x47
+	.byte 0x4e
+	.byte 0x55
+	.byte 0
+1:
+	.p2align 3
+	.long 0xc0000002
+	.long 3f - 2f
+2:
+	.long 3
+3:
+	.p2align 3
+4:

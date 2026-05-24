@@ -10,7 +10,13 @@
 
 namespace node {
 
+class IsolateData;
 class Environment;
+class ExternalReferenceRegistry;
+
+namespace contextify {
+class ContextifyContext;
+}
 
 namespace loader {
 
@@ -21,38 +27,54 @@ enum ScriptType : int {
 };
 
 enum HostDefinedOptions : int {
-  kType = 8,
-  kID = 9,
-  kLength = 10,
+  kID = 8,
+  kLength = 9,
 };
 
 class ModuleWrap : public BaseObject {
  public:
-  static void Initialize(v8::Local<v8::Object> target,
-                         v8::Local<v8::Value> unused,
-                         v8::Local<v8::Context> context,
-                         void* priv);
+  enum InternalFields {
+    kModuleSlot = BaseObject::kInternalFieldCount,
+    kURLSlot,
+    kSyntheticEvaluationStepsSlot,
+    kContextObjectSlot,  // Object whose creation context is the target Context
+    kInternalFieldCount
+  };
+
+  static void CreatePerIsolateProperties(IsolateData* isolate_data,
+                                         v8::Local<v8::ObjectTemplate> target);
+  static void CreatePerContextProperties(v8::Local<v8::Object> target,
+                                         v8::Local<v8::Value> unused,
+                                         v8::Local<v8::Context> context,
+                                         void* priv);
+  static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
   static void HostInitializeImportMetaObjectCallback(
       v8::Local<v8::Context> context,
       v8::Local<v8::Module> module,
       v8::Local<v8::Object> meta);
 
   void MemoryInfo(MemoryTracker* tracker) const override {
-    tracker->TrackField("url", url_);
     tracker->TrackField("resolve_cache", resolve_cache_);
   }
 
-  inline uint32_t id() { return id_; }
-  static ModuleWrap* GetFromID(node::Environment*, uint32_t id);
+  v8::Local<v8::Context> context() const;
 
   SET_MEMORY_INFO_NAME(ModuleWrap)
   SET_SELF_SIZE(ModuleWrap)
 
+  bool IsNotIndicativeOfMemoryLeakAtExit() const override {
+    // XXX: The garbage collection rules for ModuleWrap are *super* unclear.
+    // Do these objects ever get GC'd? Are we just okay with leaking them?
+    return true;
+  }
+
  private:
-  ModuleWrap(Environment* env,
+  ModuleWrap(Realm* realm,
              v8::Local<v8::Object> object,
              v8::Local<v8::Module> module,
-             v8::Local<v8::String> url);
+             v8::Local<v8::String> url,
+             v8::Local<v8::Object> context_object,
+             v8::Local<v8::Value> synthetic_evaluation_step);
   ~ModuleWrap() override;
 
   static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -75,20 +97,19 @@ class ModuleWrap : public BaseObject {
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static void CreateCachedData(const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  static v8::MaybeLocal<v8::Module> ResolveCallback(
+  static v8::MaybeLocal<v8::Module> ResolveModuleCallback(
       v8::Local<v8::Context> context,
       v8::Local<v8::String> specifier,
+      v8::Local<v8::FixedArray> import_attributes,
       v8::Local<v8::Module> referrer);
   static ModuleWrap* GetFromModule(node::Environment*, v8::Local<v8::Module>);
 
-  v8::Global<v8::Function> synthetic_evaluation_steps_;
-  bool synthetic_ = false;
   v8::Global<v8::Module> module_;
-  v8::Global<v8::String> url_;
-  bool linked_ = false;
   std::unordered_map<std::string, v8::Global<v8::Promise>> resolve_cache_;
-  v8::Global<v8::Context> context_;
-  uint32_t id_;
+  contextify::ContextifyContext* contextify_context_ = nullptr;
+  bool synthetic_ = false;
+  bool linked_ = false;
+  int module_hash_;
 };
 
 }  // namespace loader

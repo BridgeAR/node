@@ -1,7 +1,7 @@
 'use strict';
 
 const common = require('../common');
-const { Writable } = require('stream');
+const { Writable, addAbortSignal } = require('stream');
 const assert = require('assert');
 
 {
@@ -124,8 +124,6 @@ const assert = require('assert');
 
   write.destroy();
 
-  write.removeListener('finish', fail);
-  write.on('finish', common.mustCall());
   assert.strictEqual(write.destroyed, true);
 }
 
@@ -167,9 +165,10 @@ const assert = require('assert');
     assert.strictEqual(write._writableState.errorEmitted, true);
   }));
 
-  write.destroy(new Error('kaboom 1'));
+  const expected = new Error('kaboom 1');
+  write.destroy(expected);
   write.destroy(new Error('kaboom 2'));
-  assert.strictEqual(write._writableState.errored, true);
+  assert.strictEqual(write._writableState.errored, expected);
   assert.strictEqual(write._writableState.errorEmitted, false);
   assert.strictEqual(write.destroyed, true);
   ticked = true;
@@ -200,14 +199,14 @@ const assert = require('assert');
 
   writable.destroy();
   assert.strictEqual(writable.destroyed, true);
-  assert.strictEqual(writable._writableState.errored, false);
+  assert.strictEqual(writable._writableState.errored, null);
   assert.strictEqual(writable._writableState.errorEmitted, false);
 
   // Test case where `writable.destroy()` is called again with an error before
   // the `_destroy()` callback is called.
   writable.destroy(new Error('kaboom 2'));
   assert.strictEqual(writable._writableState.errorEmitted, false);
-  assert.strictEqual(writable._writableState.errored, false);
+  assert.strictEqual(writable._writableState.errored, null);
 
   ticked = true;
 }
@@ -350,33 +349,35 @@ const assert = require('assert');
   const write = new Writable({
     write(chunk, enc, cb) { process.nextTick(cb); }
   });
+  const _err = new Error('asd');
   write.once('error', common.mustCall((err) => {
     assert.strictEqual(err.message, 'asd');
   }));
   write.end('asd', common.mustCall((err) => {
-    assert.strictEqual(err.message, 'asd');
+    assert.strictEqual(err, _err);
   }));
-  write.destroy(new Error('asd'));
+  write.destroy(_err);
 }
 
 {
   // Call buffered write callback with error
 
+  const _err = new Error('asd');
   const write = new Writable({
     write(chunk, enc, cb) {
-      process.nextTick(cb, new Error('asd'));
+      process.nextTick(cb, _err);
     },
     autoDestroy: false
   });
   write.cork();
   write.write('asd', common.mustCall((err) => {
-    assert.strictEqual(err.message, 'asd');
+    assert.strictEqual(err, _err);
   }));
   write.write('asd', common.mustCall((err) => {
-    assert.strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+    assert.strictEqual(err, _err);
   }));
   write.on('error', common.mustCall((err) => {
-    assert.strictEqual(err.message, 'asd');
+    assert.strictEqual(err, _err);
   }));
   write.uncork();
 }
@@ -400,4 +401,89 @@ const assert = require('assert');
     assert.strictEqual(state++, 1);
   }));
   write.destroy();
+}
+
+{
+  const write = new Writable({
+    autoDestroy: false,
+    write(chunk, enc, cb) {
+      cb();
+      cb();
+    }
+  });
+
+  write.on('error', common.mustCall(() => {
+    assert(write._writableState.errored);
+  }));
+  write.write('asd');
+}
+
+{
+  const ac = new AbortController();
+  const write = addAbortSignal(ac.signal, new Writable({
+    write(chunk, enc, cb) { cb(); }
+  }));
+
+  write.on('error', common.mustCall((e) => {
+    assert.strictEqual(e.name, 'AbortError');
+    assert.strictEqual(write.destroyed, true);
+  }));
+  write.write('asd');
+  ac.abort();
+}
+
+{
+  const ac = new AbortController();
+  const write = new Writable({
+    signal: ac.signal,
+    write(chunk, enc, cb) { cb(); }
+  });
+
+  write.on('error', common.mustCall((e) => {
+    assert.strictEqual(e.name, 'AbortError');
+    assert.strictEqual(write.destroyed, true);
+  }));
+  write.write('asd');
+  ac.abort();
+}
+
+{
+  const signal = AbortSignal.abort();
+
+  const write = new Writable({
+    signal,
+    write(chunk, enc, cb) { cb(); }
+  });
+
+  write.on('error', common.mustCall((e) => {
+    assert.strictEqual(e.name, 'AbortError');
+    assert.strictEqual(write.destroyed, true);
+  }));
+}
+
+{
+  // Destroy twice
+  const write = new Writable({
+    write(chunk, enc, cb) { cb(); }
+  });
+
+  write.end(common.mustCall());
+  write.destroy();
+  write.destroy();
+}
+
+{
+  // https://github.com/nodejs/node/issues/39356
+  const s = new Writable({
+    final() {}
+  });
+  const _err = new Error('oh no');
+  // Remove `callback` and it works
+  s.end(common.mustCall((err) => {
+    assert.strictEqual(err, _err);
+  }));
+  s.on('error', common.mustCall((err) => {
+    assert.strictEqual(err, _err);
+  }));
+  s.destroy(_err);
 }

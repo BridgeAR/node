@@ -26,7 +26,9 @@ assert.deepStrictEqual(val, check);
   ['maxConcurrentStreams', 0],
   ['maxConcurrentStreams', 2 ** 31 - 1],
   ['maxHeaderListSize', 0],
-  ['maxHeaderListSize', 2 ** 32 - 1]
+  ['maxHeaderListSize', 2 ** 32 - 1],
+  ['maxHeaderSize', 0],
+  ['maxHeaderSize', 2 ** 32 - 1],
 ].forEach((i) => {
   // Valid options should not throw.
   http2.getPackedSettings({ [i[0]]: i[1] });
@@ -45,7 +47,9 @@ http2.getPackedSettings({ enablePush: false });
   ['maxConcurrentStreams', -1],
   ['maxConcurrentStreams', 2 ** 32],
   ['maxHeaderListSize', -1],
-  ['maxHeaderListSize', 2 ** 32]
+  ['maxHeaderListSize', 2 ** 32],
+  ['maxHeaderSize', -1],
+  ['maxHeaderSize', 2 ** 32],
 ].forEach((i) => {
   assert.throws(() => {
     http2.getPackedSettings({ [i[0]]: i[1] });
@@ -57,7 +61,7 @@ http2.getPackedSettings({ enablePush: false });
 });
 
 [
-  1, null, '', Infinity, new Date(), {}, NaN, [false]
+  1, null, '', Infinity, new Date(), {}, NaN, [false],
 ].forEach((i) => {
   assert.throws(() => {
     http2.getPackedSettings({ enablePush: i });
@@ -69,7 +73,7 @@ http2.getPackedSettings({ enablePush: false });
 });
 
 [
-  1, null, '', Infinity, new Date(), {}, NaN, [false]
+  1, null, '', Infinity, new Date(), {}, NaN, [false],
 ].forEach((i) => {
   assert.throws(() => {
     http2.getPackedSettings({ enableConnectProtocol: i });
@@ -88,7 +92,7 @@ http2.getPackedSettings({ enablePush: false });
     0x00, 0x04, 0x00, 0x00, 0x00, 0x64,
     0x00, 0x05, 0x00, 0x00, 0x4e, 0x20,
     0x00, 0x06, 0x00, 0x00, 0x00, 0x64,
-    0x00, 0x08, 0x00, 0x00, 0x00, 0x00
+    0x00, 0x08, 0x00, 0x00, 0x00, 0x00,
   ]);
 
   const packed = http2.getPackedSettings({
@@ -97,6 +101,7 @@ http2.getPackedSettings({ enablePush: false });
     maxFrameSize: 20000,
     maxConcurrentStreams: 200,
     maxHeaderListSize: 100,
+    maxHeaderSize: 100,
     enablePush: true,
     enableConnectProtocol: false,
     foo: 'ignored'
@@ -128,8 +133,8 @@ http2.getPackedSettings({ enablePush: false });
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
       message:
-        'The "buf" argument must be an instance of Buffer, TypedArray, or ' +
-        `DataView.${common.invalidArgTypeHelper(input)}`
+        'The "buf" argument must be an instance of Buffer or TypedArray.' +
+        common.invalidArgTypeHelper(input)
     });
   });
 
@@ -149,8 +154,61 @@ http2.getPackedSettings({ enablePush: false });
   assert.strictEqual(settings.maxFrameSize, 20000);
   assert.strictEqual(settings.maxConcurrentStreams, 200);
   assert.strictEqual(settings.maxHeaderListSize, 100);
+  assert.strictEqual(settings.maxHeaderSize, 100);
   assert.strictEqual(settings.enablePush, true);
   assert.strictEqual(settings.enableConnectProtocol, false);
+}
+
+{
+  const packed = new Uint16Array([
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x64,
+    0x00, 0x03, 0x00, 0x00, 0x00, 0xc8,
+    0x00, 0x05, 0x00, 0x00, 0x4e, 0x20,
+    0x00, 0x04, 0x00, 0x00, 0x00, 0x64,
+    0x00, 0x06, 0x00, 0x00, 0x00, 0x64,
+    0x00, 0x02, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x08, 0x00, 0x00, 0x00, 0x00]);
+
+  assert.throws(() => {
+    http2.getUnpackedSettings(packed.slice(5));
+  }, {
+    code: 'ERR_HTTP2_INVALID_PACKED_SETTINGS_LENGTH',
+    name: 'RangeError',
+    message: 'Packed settings length must be a multiple of six'
+  });
+
+  const settings = http2.getUnpackedSettings(packed);
+
+  assert(settings);
+  assert.strictEqual(settings.headerTableSize, 100);
+  assert.strictEqual(settings.initialWindowSize, 100);
+  assert.strictEqual(settings.maxFrameSize, 20000);
+  assert.strictEqual(settings.maxConcurrentStreams, 200);
+  assert.strictEqual(settings.maxHeaderListSize, 100);
+  assert.strictEqual(settings.maxHeaderSize, 100);
+  assert.strictEqual(settings.enablePush, true);
+  assert.strictEqual(settings.enableConnectProtocol, false);
+}
+
+{
+  const packed = new DataView(Buffer.from([
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x64,
+    0x00, 0x03, 0x00, 0x00, 0x00, 0xc8,
+    0x00, 0x05, 0x00, 0x00, 0x4e, 0x20,
+    0x00, 0x04, 0x00, 0x00, 0x00, 0x64,
+    0x00, 0x06, 0x00, 0x00, 0x00, 0x64,
+    0x00, 0x02, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x08, 0x00, 0x00, 0x00, 0x00]).buffer);
+
+  assert.throws(() => {
+    http2.getUnpackedSettings(packed);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+    name: 'TypeError',
+    message:
+        'The "buf" argument must be an instance of Buffer or TypedArray.' +
+        common.invalidArgTypeHelper(packed)
+  });
 }
 
 {

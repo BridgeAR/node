@@ -13,30 +13,30 @@ const date2 = new Date("2019-1-5");
 const date3 = new Date("2019-3-4");
 const date4 = new Date("2020-3-4");
 var dtf = new Intl.DateTimeFormat(["en"]);
-assertThrows(() => dtf.formatRange(), RangeError);
-assertThrows(() => dtf.formatRange(date1), RangeError);
-assertThrows(() => dtf.formatRange(undefined, date2), RangeError);
-assertThrows(() => dtf.formatRange(date1, undefined), RangeError);
+assertThrows(() => dtf.formatRange(), TypeError);
+assertThrows(() => dtf.formatRange(date1), TypeError);
+assertThrows(() => dtf.formatRange(undefined, date2), TypeError);
+assertThrows(() => dtf.formatRange(date1, undefined), TypeError);
 assertThrows(() => dtf.formatRange("2019-1-3", date2), RangeError);
 assertThrows(() => dtf.formatRange(date1, "2019-5-4"), RangeError);
-assertThrows(() => dtf.formatRange(date2, date1), RangeError);
 
+assertDoesNotThrow(() =>dtf.formatRange(date2, date1));
 assertDoesNotThrow(() =>dtf.formatRange(date1, date2));
 
-assertEquals("1/3/2019 – 1/5/2019", dtf.formatRange(date1, date2));
-assertEquals("1/3/2019 – 3/4/2019", dtf.formatRange(date1, date3));
-assertEquals("1/3/2019 – 3/4/2020", dtf.formatRange(date1, date4));
-assertEquals("1/5/2019 – 3/4/2019", dtf.formatRange(date2, date3));
-assertEquals("1/5/2019 – 3/4/2020", dtf.formatRange(date2, date4));
-assertEquals("3/4/2019 – 3/4/2020", dtf.formatRange(date3, date4));
+assertEquals("1/3/2019\u2009–\u20091/5/2019", dtf.formatRange(date1, date2));
+assertEquals("1/3/2019\u2009–\u20093/4/2019", dtf.formatRange(date1, date3));
+assertEquals("1/3/2019\u2009–\u20093/4/2020", dtf.formatRange(date1, date4));
+assertEquals("1/5/2019\u2009–\u20093/4/2019", dtf.formatRange(date2, date3));
+assertEquals("1/5/2019\u2009–\u20093/4/2020", dtf.formatRange(date2, date4));
+assertEquals("3/4/2019\u2009–\u20093/4/2020", dtf.formatRange(date3, date4));
 
 dtf = new Intl.DateTimeFormat(["en"], {year: "numeric", month: "short", day: "numeric"});
-assertEquals("Jan 3 – 5, 2019", dtf.formatRange(date1, date2));
-assertEquals("Jan 3 – Mar 4, 2019", dtf.formatRange(date1, date3));
-assertEquals("Jan 3, 2019 – Mar 4, 2020", dtf.formatRange(date1, date4));
-assertEquals("Jan 5 – Mar 4, 2019", dtf.formatRange(date2, date3));
-assertEquals("Jan 5, 2019 – Mar 4, 2020", dtf.formatRange(date2, date4));
-assertEquals("Mar 4, 2019 – Mar 4, 2020", dtf.formatRange(date3, date4));
+assertEquals("Jan 3\u2009–\u20095, 2019", dtf.formatRange(date1, date2));
+assertEquals("Jan 3\u2009–\u2009Mar 4, 2019", dtf.formatRange(date1, date3));
+assertEquals("Jan 3, 2019\u2009–\u2009Mar 4, 2020", dtf.formatRange(date1, date4));
+assertEquals("Jan 5\u2009–\u2009Mar 4, 2019", dtf.formatRange(date2, date3));
+assertEquals("Jan 5, 2019\u2009–\u2009Mar 4, 2020", dtf.formatRange(date2, date4));
+assertEquals("Mar 4, 2019\u2009–\u2009Mar 4, 2020", dtf.formatRange(date3, date4));
 
 // Test the sequence of ToNumber and TimeClip
 var secondDateAccessed = false;

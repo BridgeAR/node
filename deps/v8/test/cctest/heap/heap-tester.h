@@ -11,6 +11,8 @@
 // Tests that should have access to private methods of {v8::internal::Heap}.
 // Those tests need to be defined using HEAP_TEST(Name) { ... }.
 #define HEAP_TEST_METHODS(V)                                \
+  V(CodeLargeObjectSpace)                                   \
+  V(CodeLargeObjectSpace64k)                                \
   V(CompactionFullAbortedPage)                              \
   V(CompactionPartiallyAbortedPage)                         \
   V(CompactionPartiallyAbortedPageIntraAbortedPointers)     \
@@ -29,7 +31,6 @@
   V(InvalidatedSlotsResetObjectRegression)                  \
   V(InvalidatedSlotsRightTrimFixedArray)                    \
   V(InvalidatedSlotsRightTrimLargeFixedArray)               \
-  V(InvalidatedSlotsLeftTrimFixedArray)                     \
   V(InvalidatedSlotsFastToSlow)                             \
   V(InvalidatedSlotsSomeInvalidatedRanges)                  \
   V(TestNewSpaceRefsInCopiedCode)                           \
@@ -46,7 +47,7 @@
   V(StressHandles)                                          \
   V(TestMemoryReducerSampleJsCalls)                         \
   V(TestSizeOfObjects)                                      \
-  V(Regress5831)                                            \
+  V(Regress10560)                                           \
   V(Regress538257)                                          \
   V(Regress587004)                                          \
   V(Regress589413)                                          \
@@ -57,7 +58,11 @@
   V(Regress791582)                                          \
   V(Regress845060)                                          \
   V(RegressMissingWriteBarrierInAllocate)                   \
-  V(WriteBarriersInCopyJSObject)
+  V(WriteBarrier_Marking)                                   \
+  V(WriteBarrier_MarkingExtension)                          \
+  V(WriteBarriersInCopyJSObject)                            \
+  V(DoNotEvacuatePinnedPages)                               \
+  V(ObjectStartBitmap)
 
 #define HEAP_TEST(Name)                                                   \
   CcTest register_test_##Name(v8::internal::heap::HeapTester::Test##Name, \
@@ -76,10 +81,6 @@
 
 namespace v8 {
 namespace internal {
-
-template <typename T>
-class Handle;
-
 namespace heap {
 
 class HeapTester {
@@ -110,7 +111,7 @@ class HeapTester {
   static AllocationResult AllocateFixedArrayForTest(Heap* heap, int length,
                                                     AllocationType allocation);
 
-  static void UncommitFromSpace(Heap* heap);
+  static void UncommitUnusedMemory(Heap* heap);
 };
 
 }  // namespace heap

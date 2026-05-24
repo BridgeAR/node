@@ -19,11 +19,11 @@
 namespace v8 {
 namespace internal {
 
-OBJECT_CONSTRUCTORS_IMPL(JSLocale, JSObject)
+#include "torque-generated/src/objects/js-locale-tq-inl.inc"
 
-ACCESSORS(JSLocale, icu_locale, Managed<icu::Locale>, kIcuLocaleOffset)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSLocale)
 
-CAST_ACCESSOR(JSLocale)
+ACCESSORS(JSLocale, icu_locale, Tagged<Managed<icu::Locale>>, kIcuLocaleOffset)
 
 }  // namespace internal
 }  // namespace v8

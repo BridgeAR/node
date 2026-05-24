@@ -15,8 +15,7 @@ const makeDuplexPair = require('../common/duplexpair');
 let { clientSide } = makeDuplexPair();
 
 let clientTLS = new TLSSocket(clientSide, { isServer: false });
-// eslint-disable-next-line no-unused-vars
-let clientTLSHandle = clientTLS._handle;
+let clientTLSHandle = clientTLS._handle;  // eslint-disable-line no-unused-vars
 
 setImmediate(() => {
   clientTLS = null;

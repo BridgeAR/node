@@ -1,9 +1,8 @@
-#!/usr/bin/env python
-# Copcright 2019 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from __future__ import print_function
 import argparse
 import sys
 import os
@@ -31,13 +30,16 @@ FILES_TO_SYNC = [
     'crdtp/find_by_first.h',
     'crdtp/find_by_first_test.cc',
     'crdtp/frontend_channel.h',
-    'crdtp/glue.h',
-    'crdtp/glue_test.cc',
+    'crdtp/maybe.h',
+    'crdtp/maybe_test.cc',
     'crdtp/json.cc',
     'crdtp/json.h',
     'crdtp/json_platform.h',
     'crdtp/json_test.cc',
     'crdtp/parser_handler.h',
+    'crdtp/protocol_core_test.cc',
+    'crdtp/protocol_core.cc',
+    'crdtp/protocol_core.h',
     'crdtp/serializable.h',
     'crdtp/serializable.cc',
     'crdtp/serializable_test.cc',
@@ -64,7 +66,7 @@ def RunCmd(cmd):
   (stdoutdata, stderrdata) = p.communicate()
   if p.returncode != 0:
     raise Exception('%s: exit status %d', str(cmd), p.returncode)
-  return stdoutdata
+  return stdoutdata.decode('utf-8')
 
 
 def CheckRepoIsClean(path, suffix):

@@ -26,13 +26,17 @@ namespace U_ICU_NAMESPACE {
 class PluralRules;
 namespace number {
 class LocalizedNumberFormatter;
-}  //  namespace number
-}  //  namespace U_ICU_NAMESPACE
+class LocalizedNumberRangeFormatter;
+}  // namespace number
+}  // namespace U_ICU_NAMESPACE
 
 namespace v8 {
 namespace internal {
 
-class JSPluralRules : public JSObject {
+#include "torque-generated/src/objects/js-plural-rules-tq.inc"
+
+class JSPluralRules
+    : public TorqueGeneratedJSPluralRules<JSPluralRules, JSObject> {
  public:
   V8_WARN_UNUSED_RESULT static MaybeHandle<JSPluralRules> New(
       Isolate* isolate, Handle<Map> map, Handle<Object> locales,
@@ -44,6 +48,9 @@ class JSPluralRules : public JSObject {
   V8_WARN_UNUSED_RESULT static MaybeHandle<String> ResolvePlural(
       Isolate* isolate, Handle<JSPluralRules> plural_rules, double number);
 
+  V8_WARN_UNUSED_RESULT static MaybeHandle<String> ResolvePluralRange(
+      Isolate* isolate, Handle<JSPluralRules> plural_rules, double x, double y);
+
   V8_EXPORT_PRIVATE static const std::set<std::string>& GetAvailableLocales();
 
   // [[Type]] is one of the values "cardinal" or "ordinal",
@@ -54,27 +61,19 @@ class JSPluralRules : public JSObject {
 
   Handle<String> TypeAsString() const;
 
-  DECL_CAST(JSPluralRules)
   DECL_PRINTER(JSPluralRules)
-  DECL_VERIFIER(JSPluralRules)
 
   // Bit positions in |flags|.
   DEFINE_TORQUE_GENERATED_JS_PLURAL_RULES_FLAGS()
 
-  STATIC_ASSERT(Type::CARDINAL <= TypeBit::kMax);
-  STATIC_ASSERT(Type::ORDINAL <= TypeBit::kMax);
+  static_assert(Type::CARDINAL <= TypeBit::kMax);
+  static_assert(Type::ORDINAL <= TypeBit::kMax);
 
-  // Layout description.
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                TORQUE_GENERATED_JS_PLURAL_RULES_FIELDS)
-
-  DECL_ACCESSORS(locale, String)
-  DECL_INT_ACCESSORS(flags)
-  DECL_ACCESSORS(icu_plural_rules, Managed<icu::PluralRules>)
+  DECL_ACCESSORS(icu_plural_rules, Tagged<Managed<icu::PluralRules>>)
   DECL_ACCESSORS(icu_number_formatter,
-                 Managed<icu::number::LocalizedNumberFormatter>)
+                 Tagged<Managed<icu::number::LocalizedNumberFormatter>>)
 
-  OBJECT_CONSTRUCTORS(JSPluralRules, JSObject);
+  TQ_OBJECT_CONSTRUCTORS(JSPluralRules)
 };
 
 }  // namespace internal

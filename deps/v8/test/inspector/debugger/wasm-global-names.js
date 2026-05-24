@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+utils.load('test/inspector/wasm-inspector-test.js');
+
 let {session, contextGroup, Protocol} =
     InspectorTest.start('Test wasm global names');
-
-utils.load('test/mjsunit/wasm/wasm-module-builder.js');
 
 let builder = new WasmModuleBuilder();
 builder.addImportedGlobal('module_name', 'imported_global', kWasmI32, false);
@@ -17,23 +17,13 @@ let func = builder.addFunction('func', kSig_v_i)
                .exportAs('main');
 var o = builder.addGlobal(kWasmI32, func).exportAs('exported_global');
 builder.addGlobal(kWasmI32);  // global2
-let moduleBytes = JSON.stringify(builder.toArray());
+let moduleBytes = builder.toArray();
 
-function test(moduleBytes) {
-  let module = new WebAssembly.Module((new Uint8Array(moduleBytes)).buffer);
-  let imported_global_value = 123;
-  instance = new WebAssembly.Instance(
-      module, {module_name: {imported_global: imported_global_value}});
-}
-
-(async function() {
-  try {
+InspectorTest.runAsyncTestSuite([
+  async function test() {
     Protocol.Debugger.enable();
     Protocol.Runtime.evaluate({
-      expression: `
-      let instance;
-      ${test.toString()}
-      test(${moduleBytes});`
+      expression: `var instance = (${WasmInspectorTest.instantiateFromBuffer})(${JSON.stringify(moduleBytes)}, {module_name: {imported_global: 123}});`
     });
 
     InspectorTest.log('Waiting for wasm script to be parsed.');
@@ -58,25 +48,19 @@ function test(moduleBytes) {
     InspectorTest.log('Paused in debugger.');
     let scopeChain = callFrames[0].scopeChain;
     for (let scope of scopeChain) {
-      if (scope.type != 'global') continue;
-
-      let globalObjectProps = (await Protocol.Runtime.getProperties({
+      if (scope.type != 'module') continue;
+      let moduleObjectProps = (await Protocol.Runtime.getProperties({
                                 'objectId': scope.object.objectId
                               })).result.result;
 
-      for (let prop of globalObjectProps) {
+      for (let prop of moduleObjectProps) {
+        if (prop.name != 'globals') continue;
         let subProps = (await Protocol.Runtime.getProperties({
-                         objectId: prop.value.objectId
-                       })).result.result;
+                        objectId: prop.value.objectId
+                      })).result.result;
         let values = subProps.map((value) => `"${value.name}"`).join(', ');
         InspectorTest.log(`   ${prop.name}: {${values}}`);
       }
     }
-
-    InspectorTest.log('Finished.');
-  } catch (exc) {
-    InspectorTest.log(`Failed with exception: ${exc}.`);
-  } finally {
-    InspectorTest.completeTest();
   }
-})();
+]);

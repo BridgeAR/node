@@ -38,12 +38,10 @@ server.listen(0, '127.0.0.1', function() {
 server.on('tlsClientError', (err) => errors.push(err));
 
 process.on('exit', function() {
-  if (/unknown option -ssl3/.test(stderr)) {
+  if (/[Uu]nknown option:? -ssl3/.test(stderr)) {
     common.printSkipMessage('`openssl s_client -ssl3` not supported.');
   } else {
     assert.strictEqual(errors.length, 1);
-    // OpenSSL 1.0.x and 1.1.x report invalid client versions differently.
-    assert(/:wrong version number/.test(errors[0].message) ||
-           /:version too low/.test(errors[0].message));
+    assert(/:version too low/.test(errors[0].message));
   }
 });

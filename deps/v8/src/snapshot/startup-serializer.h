@@ -7,6 +7,7 @@
 
 #include <unordered_set>
 
+#include "src/handles/global-handles.h"
 #include "src/snapshot/roots-serializer.h"
 
 namespace v8 {
@@ -14,45 +15,46 @@ namespace internal {
 
 class HeapObject;
 class SnapshotByteSink;
-class ReadOnlySerializer;
+class SharedHeapSerializer;
 
 class V8_EXPORT_PRIVATE StartupSerializer : public RootsSerializer {
  public:
-  StartupSerializer(Isolate* isolate, ReadOnlySerializer* read_only_serializer);
+  StartupSerializer(Isolate* isolate, Snapshot::SerializerFlags flags,
+                    SharedHeapSerializer* shared_heap_serializer);
   ~StartupSerializer() override;
+  StartupSerializer(const StartupSerializer&) = delete;
+  StartupSerializer& operator=(const StartupSerializer&) = delete;
 
   // Serialize the current state of the heap.  The order is:
   // 1) Strong roots
   // 2) Builtins and bytecode handlers
-  // 3) Partial snapshot cache
+  // 3) Startup object cache
   // 4) Weak references (e.g. the string table)
-  void SerializeStrongReferences();
+  void SerializeStrongReferences(const DisallowGarbageCollection& no_gc);
   void SerializeWeakReferencesAndDeferred();
 
-  // If |obj| can be serialized in the read-only snapshot then add it to the
-  // read-only object cache if not already present and emits a
-  // ReadOnlyObjectCache bytecode into |sink|. Returns whether this was
+  // If |obj| can be serialized in the shared heap snapshot then add it to the
+  // shareable object cache if not already present and emits a
+  // SharedHeapObjectCache bytecode into |sink|. Returns whether this was
   // successful.
-  bool SerializeUsingReadOnlyObjectCache(SnapshotByteSink* sink,
-                                         HeapObject obj);
+  bool SerializeUsingSharedHeapObjectCache(SnapshotByteSink* sink,
+                                           Handle<HeapObject> obj);
 
-  // Adds |obj| to the partial snapshot object cache if not already present and
-  // emits a PartialSnapshotCache bytecode into |sink|.
-  void SerializeUsingPartialSnapshotCache(SnapshotByteSink* sink,
-                                          HeapObject obj);
+  // Adds |obj| to the startup object object cache if not already present and
+  // emits a StartupObjectCache bytecode into |sink|.
+  void SerializeUsingStartupObjectCache(SnapshotByteSink* sink,
+                                        Handle<HeapObject> obj);
 
   // The per-heap dirty FinalizationRegistry list is weak and not serialized. No
   // JSFinalizationRegistries should be used during startup.
   void CheckNoDirtyFinalizationRegistries();
 
  private:
-  void SerializeObject(HeapObject o) override;
+  void SerializeObjectImpl(Handle<HeapObject> o, SlotType slot_type) override;
 
-  ReadOnlySerializer* read_only_serializer_;
-  std::vector<AccessorInfo> accessor_infos_;
-  std::vector<CallHandlerInfo> call_handler_infos_;
-
-  DISALLOW_COPY_AND_ASSIGN(StartupSerializer);
+  SharedHeapSerializer* const shared_heap_serializer_;
+  GlobalHandleVector<AccessorInfo> accessor_infos_;
+  GlobalHandleVector<CallHandlerInfo> call_handler_infos_;
 };
 
 class SerializedHandleChecker : public RootVisitor {
@@ -63,7 +65,7 @@ class SerializedHandleChecker : public RootVisitor {
   bool CheckGlobalAndEternalHandles();
 
  private:
-  void AddToSet(FixedArray serialized);
+  void AddToSet(Tagged<FixedArray> serialized);
 
   Isolate* isolate_;
   std::unordered_set<Object, Object::Hasher> serialized_;

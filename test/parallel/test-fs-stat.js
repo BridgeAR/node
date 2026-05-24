@@ -25,19 +25,17 @@ const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
 
-fs.stat('.', common.mustCall(function(err, stats) {
-  assert.ifError(err);
+fs.stat('.', common.mustSucceed(function(stats) {
   assert.ok(stats.mtime instanceof Date);
-  assert.ok(stats.hasOwnProperty('blksize'));
-  assert.ok(stats.hasOwnProperty('blocks'));
+  assert.ok(Object.hasOwn(stats, 'blksize'));
+  assert.ok(Object.hasOwn(stats, 'blocks'));
   // Confirm that we are not running in the context of the internal binding
   // layer.
   // Ref: https://github.com/nodejs/node/commit/463d6bac8b349acc462d345a6e298a76f7d06fb1
   assert.strictEqual(this, undefined);
 }));
 
-fs.lstat('.', common.mustCall(function(err, stats) {
-  assert.ifError(err);
+fs.lstat('.', common.mustSucceed(function(stats) {
   assert.ok(stats.mtime instanceof Date);
   // Confirm that we are not running in the context of the internal binding
   // layer.
@@ -46,12 +44,12 @@ fs.lstat('.', common.mustCall(function(err, stats) {
 }));
 
 // fstat
-fs.open('.', 'r', undefined, common.mustCall(function(err, fd) {
-  assert.ifError(err);
+fs.open('.', 'r', undefined, common.mustSucceed(function(fd) {
   assert.ok(fd);
 
-  fs.fstat(fd, common.mustCall(function(err, stats) {
-    assert.ifError(err);
+  fs.fstat(-0, common.mustSucceed());
+
+  fs.fstat(fd, common.mustSucceed(function(stats) {
     assert.ok(stats.mtime instanceof Date);
     fs.close(fd, assert.ifError);
     // Confirm that we are not running in the context of the internal binding
@@ -70,11 +68,10 @@ fs.open('.', 'r', undefined, common.mustCall(function(err, fd) {
 fs.open('.', 'r', undefined, common.mustCall(function(err, fd) {
   const stats = fs.fstatSync(fd);
   assert.ok(stats.mtime instanceof Date);
-  fs.close(fd, common.mustCall(assert.ifError));
+  fs.close(fd, common.mustSucceed());
 }));
 
-fs.stat(__filename, common.mustCall(function(err, s) {
-  assert.ifError(err);
+fs.stat(__filename, common.mustSucceed((s) => {
   assert.strictEqual(s.isDirectory(), false);
   assert.strictEqual(s.isFile(), true);
   assert.strictEqual(s.isSocket(), false);
@@ -154,12 +151,12 @@ fs.stat(__filename, common.mustCall(function(err, s) {
 });
 
 // Should not throw an error
-fs.stat(__filename, undefined, common.mustCall(() => {}));
+fs.stat(__filename, undefined, common.mustCall());
 
 fs.open(__filename, 'r', undefined, common.mustCall((err, fd) => {
   // Should not throw an error
-  fs.fstat(fd, undefined, common.mustCall(() => {}));
+  fs.fstat(fd, undefined, common.mustCall());
 }));
 
 // Should not throw an error
-fs.lstat(__filename, undefined, common.mustCall(() => {}));
+fs.lstat(__filename, undefined, common.mustCall());

@@ -27,7 +27,6 @@ const fixtures = require('../common/fixtures');
 
 const assert = require('assert');
 const fs = require('fs');
-const path = require('path');
 
 // 0 if not found in fs.constants
 const { O_APPEND = 0,
@@ -38,8 +37,7 @@ const { O_APPEND = 0,
         O_SYNC = 0,
         O_DSYNC = 0,
         O_TRUNC = 0,
-        O_WRONLY = 0
-} = fs.constants;
+        O_WRONLY = 0 } = fs.constants;
 
 const { stringToFlags } = require('internal/fs/utils');
 
@@ -70,27 +68,26 @@ assert.strictEqual(stringToFlags('sa+'), O_APPEND | O_CREAT | O_RDWR | O_SYNC);
   .forEach(function(flags) {
     assert.throws(
       () => stringToFlags(flags),
-      { code: 'ERR_INVALID_OPT_VALUE', name: 'TypeError' }
+      { code: 'ERR_INVALID_ARG_VALUE', name: 'TypeError' }
     );
   });
 
 assert.throws(
   () => stringToFlags({}),
-  { code: 'ERR_INVALID_OPT_VALUE', name: 'TypeError' }
+  { code: 'ERR_INVALID_ARG_VALUE', name: 'TypeError' }
 );
 
 assert.throws(
   () => stringToFlags(true),
-  { code: 'ERR_INVALID_OPT_VALUE', name: 'TypeError' }
+  { code: 'ERR_INVALID_ARG_VALUE', name: 'TypeError' }
 );
 
 if (common.isLinux || common.isOSX) {
   const tmpdir = require('../common/tmpdir');
   tmpdir.refresh();
-  const file = path.join(tmpdir.path, 'a.js');
+  const file = tmpdir.resolve('a.js');
   fs.copyFileSync(fixtures.path('a.js'), file);
-  fs.open(file, O_DSYNC, common.mustCall((err, fd) => {
-    assert.ifError(err);
+  fs.open(file, O_DSYNC, common.mustSucceed((fd) => {
     fs.closeSync(fd);
   }));
 }

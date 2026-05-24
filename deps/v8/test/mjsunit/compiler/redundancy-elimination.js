@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --opt
+// Flags: --allow-natives-syntax --turbofan
 
 // Test the RedundancyElimination::ReduceSpeculativeNumberOperation()
 // TurboFan optimization for the case of SpeculativeNumberAdd with
@@ -155,10 +155,8 @@
   %OptimizeFunctionOnNextCall(foo);
   assertEquals(1, foo([1, 2], 0));
   assertEquals(1, foo([1, 2], 1));
-  // Even passing -0 should not deoptimize and
-  // of course still pass the equality test above.
-  assertEquals(9, foo([9, 2], -0));
   assertOptimized(foo);
+  assertEquals(9, foo([9, 2], -0));
 })();
 
 // Test the RedundancyElimination::ReduceSpeculativeNumberComparison()
@@ -176,10 +174,8 @@
   %OptimizeFunctionOnNextCall(foo);
   assertEquals(1, foo([1, 2], 0));
   assertEquals(1, foo([1, 2], 1));
-  // Even passing -0 should not deoptimize and
-  // of course still pass the equality test above.
-  assertEquals(9, foo([9, 2], -0));
   assertOptimized(foo);
+  assertEquals(9, foo([9, 2], -0));
 })();
 
 // Test the RedundancyElimination::ReduceSpeculativeNumberComparison()
@@ -197,8 +193,6 @@
   %OptimizeFunctionOnNextCall(foo);
   assertEquals(1, foo([1, 2], 0));
   assertEquals(1, foo([1, 2], 1));
-  // Even passing -0 should not deoptimize and
-  // of course still pass the equality test above.
-  assertEquals(9, foo([9, 2], -0));
   assertOptimized(foo);
+  assertEquals(9, foo([9, 2], -0));
 })();

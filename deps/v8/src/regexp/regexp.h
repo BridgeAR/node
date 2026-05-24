@@ -5,12 +5,18 @@
 #ifndef V8_REGEXP_REGEXP_H_
 #define V8_REGEXP_REGEXP_H_
 
-#include "src/objects/js-regexp.h"
+#include "src/common/assert-scope.h"
+#include "src/handles/handles.h"
 #include "src/regexp/regexp-error.h"
+#include "src/regexp/regexp-flags.h"
+#include "src/zone/zone-containers.h"
 
 namespace v8 {
 namespace internal {
 
+class JSRegExp;
+class RegExpCapture;
+class RegExpMatchInfo;
 class RegExpNode;
 class RegExpTree;
 
@@ -27,7 +33,7 @@ struct RegExpCompileData {
 
   // Either the generated code as produced by the compiler or a trampoline
   // to the interpreter.
-  Object code;
+  Handle<Object> code;
 
   // True, iff the pattern is a 'simple' atom with zero captures. In other
   // words, the pattern consists of a string with no metacharacters and special
@@ -37,9 +43,9 @@ struct RegExpCompileData {
   // True, iff the pattern is anchored at the start of the string with '^'.
   bool contains_anchor = false;
 
-  // Only use if the pattern contains named captures. If so, this contains a
-  // mapping of capture names to capture indices.
-  Handle<FixedArray> capture_name_map;
+  // Only set if the pattern contains named captures.
+  // Note: the lifetime equals that of the parse/compile zone.
+  ZoneVector<RegExpCapture*>* named_captures = nullptr;
 
   // The error message. Only used if an error occurred during parsing or
   // compilation.
@@ -62,9 +68,18 @@ struct RegExpCompileData {
 class RegExp final : public AllStatic {
  public:
   // Whether the irregexp engine generates interpreter bytecode.
-  static bool CanGenerateBytecode() {
-    return FLAG_regexp_interpret_all || FLAG_regexp_tier_up;
-  }
+  static bool CanGenerateBytecode();
+
+  // Verify that the given flags combination is valid.
+  V8_EXPORT_PRIVATE static bool VerifyFlags(RegExpFlags flags);
+
+  // Verify the given pattern, i.e. check that parsing succeeds. If
+  // verification fails, `regexp_error_out` is set.
+  template <class CharT>
+  static bool VerifySyntax(Zone* zone, uintptr_t stack_limit,
+                           const CharT* input, int input_length,
+                           RegExpFlags flags, RegExpError* regexp_error_out,
+                           const DisallowGarbageCollection& no_gc);
 
   // Parses the RegExp pattern and prepares the JSRegExp object with
   // generic data and choice of implementation - as well as what
@@ -72,40 +87,58 @@ class RegExp final : public AllStatic {
   // Returns false if compilation fails.
   V8_WARN_UNUSED_RESULT static MaybeHandle<Object> Compile(
       Isolate* isolate, Handle<JSRegExp> re, Handle<String> pattern,
-      JSRegExp::Flags flags, uint32_t backtrack_limit);
+      RegExpFlags flags, uint32_t backtrack_limit);
+
+  // Ensures that a regexp is fully compiled and ready to be executed on a
+  // subject string.  Returns true on success. Return false on failure, and
+  // then an exception will be pending.
+  V8_WARN_UNUSED_RESULT static bool EnsureFullyCompiled(Isolate* isolate,
+                                                        Handle<JSRegExp> re,
+                                                        Handle<String> subject);
 
   enum CallOrigin : int {
     kFromRuntime = 0,
     kFromJs = 1,
   };
 
+  enum class ExecQuirks {
+    kNone,
+    // Used to work around an issue in the RegExpPrototypeSplit fast path,
+    // which diverges from the spec by not creating a sticky copy of the RegExp
+    // instance and calling `exec` in a loop. If called in this context, we
+    // must not update the last_match_info on a successful match at the subject
+    // string end. See crbug.com/1075514 for more information.
+    kTreatMatchAtEndAsFailure,
+  };
+
   // See ECMA-262 section 15.10.6.2.
   // This function calls the garbage collector if necessary.
   V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT static MaybeHandle<Object> Exec(
       Isolate* isolate, Handle<JSRegExp> regexp, Handle<String> subject,
-      int index, Handle<RegExpMatchInfo> last_match_info);
+      int index, Handle<RegExpMatchInfo> last_match_info,
+      ExecQuirks exec_quirks = ExecQuirks::kNone);
+
+  V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT static MaybeHandle<Object>
+  ExperimentalOneshotExec(Isolate* isolate, Handle<JSRegExp> regexp,
+                          Handle<String> subject, int index,
+                          Handle<RegExpMatchInfo> last_match_info,
+                          ExecQuirks exec_quirks = ExecQuirks::kNone);
 
   // Integral return values used throughout regexp code layers.
   static constexpr int kInternalRegExpFailure = 0;
   static constexpr int kInternalRegExpSuccess = 1;
   static constexpr int kInternalRegExpException = -1;
   static constexpr int kInternalRegExpRetry = -2;
+  static constexpr int kInternalRegExpFallbackToExperimental = -3;
+  static constexpr int kInternalRegExpSmallestResult = -3;
 
   enum IrregexpResult : int32_t {
     RE_FAILURE = kInternalRegExpFailure,
     RE_SUCCESS = kInternalRegExpSuccess,
     RE_EXCEPTION = kInternalRegExpException,
+    RE_RETRY = kInternalRegExpRetry,
+    RE_FALLBACK_TO_EXPERIMENTAL = kInternalRegExpFallbackToExperimental,
   };
-
-  // Prepare a RegExp for being executed one or more times (using
-  // IrregexpExecOnce) on the subject.
-  // This ensures that the regexp is compiled for the subject, and that
-  // the subject is flat.
-  // Returns the number of integer spaces required by IrregexpExecOnce
-  // as its "registers" argument.  If the regexp cannot be compiled,
-  // an exception is set as pending, and this function returns negative.
-  static int IrregexpPrepare(Isolate* isolate, Handle<JSRegExp> regexp,
-                             Handle<String> subject);
 
   // Set last match info.  If match is nullptr, then setting captures is
   // omitted.
@@ -113,17 +146,28 @@ class RegExp final : public AllStatic {
       Isolate* isolate, Handle<RegExpMatchInfo> last_match_info,
       Handle<String> subject, int capture_count, int32_t* match);
 
-  V8_EXPORT_PRIVATE static bool CompileForTesting(Isolate* isolate, Zone* zone,
-                                                  RegExpCompileData* input,
-                                                  JSRegExp::Flags flags,
-                                                  Handle<String> pattern,
-                                                  Handle<String> sample_subject,
-                                                  bool is_one_byte);
+  V8_EXPORT_PRIVATE static bool CompileForTesting(
+      Isolate* isolate, Zone* zone, RegExpCompileData* input, RegExpFlags flags,
+      Handle<String> pattern, Handle<String> sample_subject, bool is_one_byte);
 
   V8_EXPORT_PRIVATE static void DotPrintForTesting(const char* label,
                                                    RegExpNode* node);
 
   static const int kRegExpTooLargeToOptimize = 20 * KB;
+
+  V8_WARN_UNUSED_RESULT
+  static MaybeHandle<Object> ThrowRegExpException(Isolate* isolate,
+                                                  Handle<JSRegExp> re,
+                                                  RegExpFlags flags,
+                                                  Handle<String> pattern,
+                                                  RegExpError error);
+  static void ThrowRegExpException(Isolate* isolate, Handle<JSRegExp> re,
+                                   RegExpError error_text);
+
+  static bool IsUnmodifiedRegExp(Isolate* isolate, Handle<JSRegExp> regexp);
+
+  static Handle<FixedArray> CreateCaptureNameMap(
+      Isolate* isolate, ZoneVector<RegExpCapture*>* named_captures);
 };
 
 // Uses a special global mode of irregexp-generated code to perform a global
@@ -170,14 +214,16 @@ class RegExpResultsCache final : public AllStatic {
 
   // Attempt to retrieve a cached result.  On failure, 0 is returned as a Smi.
   // On success, the returned result is guaranteed to be a COW-array.
-  static Object Lookup(Heap* heap, String key_string, Object key_pattern,
-                       FixedArray* last_match_out, ResultsCacheType type);
+  static Tagged<Object> Lookup(Heap* heap, Tagged<String> key_string,
+                               Tagged<Object> key_pattern,
+                               FixedArray* last_match_out,
+                               ResultsCacheType type);
   // Attempt to add value_array to the cache specified by type.  On success,
   // value_array is turned into a COW-array.
   static void Enter(Isolate* isolate, Handle<String> key_string,
                     Handle<Object> key_pattern, Handle<FixedArray> value_array,
                     Handle<FixedArray> last_match_cache, ResultsCacheType type);
-  static void Clear(FixedArray cache);
+  static void Clear(Tagged<FixedArray> cache);
 
   static constexpr int kRegExpResultsCacheSize = 0x100;
 

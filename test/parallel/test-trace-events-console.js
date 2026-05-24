@@ -2,7 +2,6 @@
 const common = require('../common');
 const assert = require('assert');
 const cp = require('child_process');
-const path = require('path');
 const fs = require('fs');
 const tmpdir = require('../common/tmpdir');
 
@@ -11,7 +10,7 @@ const tmpdir = require('../common/tmpdir');
 
 const names = [
   'time::foo',
-  'count::bar'
+  'count::bar',
 ];
 const expectedCounts = [ 1, 2, 0 ];
 const expectedTimeTypes = [ 'b', 'n', 'e' ];
@@ -37,12 +36,12 @@ if (process.argv[2] === 'child') {
                          cwd: tmpdir.path,
                          execArgv: [
                            '--trace-event-categories',
-                           'node.console'
+                           'node.console',
                          ]
                        });
 
   proc.once('exit', common.mustCall(async () => {
-    const file = path.join(tmpdir.path, 'node_trace.1.log');
+    const file = tmpdir.resolve('node_trace.1.log');
 
     assert(fs.existsSync(file));
     const data = await fs.promises.readFile(file, { encoding: 'utf8' });

@@ -37,10 +37,10 @@ class TaggedIndex : public Object {
   // This replaces the OBJECT_CONSTRUCTORS macro, because TaggedIndex are
   // special in that we want them to be constexprs.
   constexpr TaggedIndex() : Object() {}
+  explicit constexpr TaggedIndex(Address ptr, SkipTypeCheckTag)
+      : Object(ptr, SkipTypeCheckTag()) {}
   explicit constexpr TaggedIndex(Address ptr) : Object(ptr) {
-#if V8_HAS_CXX14_CONSTEXPR
     DCHECK(HAS_SMI_TAG(ptr));
-#endif
   }
 
   // Returns the integer value.
@@ -50,11 +50,10 @@ class TaggedIndex : public Object {
   }
 
   // Convert a value to a TaggedIndex object.
-  static inline TaggedIndex FromIntptr(intptr_t value) {
-#if V8_HAS_CXX14_CONSTEXPR
+  static inline Tagged<TaggedIndex> FromIntptr(intptr_t value) {
     DCHECK(TaggedIndex::IsValid(value));
-#endif
-    return TaggedIndex((static_cast<Address>(value) << kSmiTagSize) | kSmiTag);
+    return Tagged<TaggedIndex>((static_cast<Address>(value) << kSmiTagSize) |
+                               kSmiTag);
   }
 
   // Returns whether value can be represented in a TaggedIndex.
@@ -65,9 +64,9 @@ class TaggedIndex : public Object {
   DECL_CAST(TaggedIndex)
 
   // Dispatched behavior.
-  DECL_VERIFIER(TaggedIndex)
+  DECL_STATIC_VERIFIER(TaggedIndex)
 
-  STATIC_ASSERT(kSmiTagSize == 1);
+  static_assert(kSmiTagSize == 1);
   static constexpr int kTaggedValueSize = 31;
   static constexpr intptr_t kMinValue =
       static_cast<intptr_t>(kUintptrAllBitsSet << (kTaggedValueSize - 1));
@@ -75,6 +74,20 @@ class TaggedIndex : public Object {
 };
 
 CAST_ACCESSOR(TaggedIndex)
+
+// Defined Tagged<TaggedIndex> now that TaggedIndex exists.
+
+// Implicit conversions to/from raw pointers
+// TODO(leszeks): Remove once we're using Tagged everywhere.
+// NOLINTNEXTLINE
+constexpr Tagged<TaggedIndex>::Tagged(TaggedIndex raw) : TaggedBase(raw.ptr()) {
+  static_assert(kTaggedCanConvertToRawObjects);
+}
+// NOLINTNEXTLINE
+constexpr Tagged<TaggedIndex>::operator TaggedIndex() {
+  static_assert(kTaggedCanConvertToRawObjects);
+  return TaggedIndex(ptr());
+}
 
 }  // namespace internal
 }  // namespace v8

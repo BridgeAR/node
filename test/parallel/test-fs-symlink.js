@@ -26,7 +26,6 @@ if (!common.canCreateSymLink())
   common.skip('insufficient privileges');
 
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs');
 
 let linkTime;
@@ -37,23 +36,18 @@ tmpdir.refresh();
 
 // Test creating and reading symbolic link
 const linkData = fixtures.path('/cycles/root.js');
-const linkPath = path.join(tmpdir.path, 'symlink1.js');
+const linkPath = tmpdir.resolve('symlink1.js');
 
-fs.symlink(linkData, linkPath, common.mustCall(function(err) {
-  assert.ifError(err);
-
-  fs.lstat(linkPath, common.mustCall(function(err, stats) {
-    assert.ifError(err);
+fs.symlink(linkData, linkPath, common.mustSucceed(() => {
+  fs.lstat(linkPath, common.mustSucceed((stats) => {
     linkTime = stats.mtime.getTime();
   }));
 
-  fs.stat(linkPath, common.mustCall(function(err, stats) {
-    assert.ifError(err);
+  fs.stat(linkPath, common.mustSucceed((stats) => {
     fileTime = stats.mtime.getTime();
   }));
 
-  fs.readlink(linkPath, common.mustCall(function(err, destination) {
-    assert.ifError(err);
+  fs.readlink(linkPath, common.mustSucceed((destination) => {
     assert.strictEqual(destination, linkData);
   }));
 }));
@@ -61,11 +55,9 @@ fs.symlink(linkData, linkPath, common.mustCall(function(err) {
 // Test invalid symlink
 {
   const linkData = fixtures.path('/not/exists/file');
-  const linkPath = path.join(tmpdir.path, 'symlink2.js');
+  const linkPath = tmpdir.resolve('symlink2.js');
 
-  fs.symlink(linkData, linkPath, common.mustCall(function(err) {
-    assert.ifError(err);
-
+  fs.symlink(linkData, linkPath, common.mustSucceed(() => {
     assert(!fs.existsSync(linkPath));
   }));
 }
@@ -92,6 +84,6 @@ const errObj = {
 assert.throws(() => fs.symlink('', '', '🍏', common.mustNotCall()), errObj);
 assert.throws(() => fs.symlinkSync('', '', '🍏'), errObj);
 
-process.on('exit', function() {
+process.on('exit', () => {
   assert.notStrictEqual(linkTime, fileTime);
 });

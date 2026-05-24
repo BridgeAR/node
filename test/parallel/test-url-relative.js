@@ -7,9 +7,7 @@ const url = require('url');
 // When source is false
 assert.strictEqual(url.resolveObject('', 'foo'), 'foo');
 
-/*
- [from, path, expected]
-*/
+// [from, path, expected]
 const relativeTests = [
   ['/foo/bar/baz', 'quux', '/foo/bar/quux'],
   ['/foo/bar/baz', 'quux/asdf', '/foo/bar/quux/asdf'],
@@ -54,15 +52,18 @@ const relativeTests = [
    'http://example.com/a/b/c/d'],
   ['/foo/bar/baz', '/../etc/passwd', '/etc/passwd'],
   ['http://localhost', 'file:///Users/foo', 'file:///Users/foo'],
-  ['http://localhost', 'file://foo/Users', 'file://foo/Users']
+  ['http://localhost', 'file://foo/Users', 'file://foo/Users'],
+  ['https://registry.npmjs.org', '@foo/bar', 'https://registry.npmjs.org/@foo/bar'],
 ];
-relativeTests.forEach(function(relativeTest) {
+for (let i = 0; i < relativeTests.length; i++) {
+  const relativeTest = relativeTests[i];
+
   const a = url.resolve(relativeTest[0], relativeTest[1]);
   const e = relativeTest[2];
   assert.strictEqual(a, e,
                      `resolve(${relativeTest[0]}, ${relativeTest[1]})` +
                      ` == ${e}\n  actual=${a}`);
-});
+}
 
 //
 // Tests below taken from Chiron
@@ -78,7 +79,7 @@ const bases = [
   'http://a/b/c/d;p?q=1/2',
   'http://a/b/c/d;p=1/2?q',
   'fred:///s//a/b/c',
-  'http:///s//a/b/c'
+  'http:///s//a/b/c',
 ];
 
 // [to, from, result]
@@ -373,21 +374,25 @@ const relativeTests2 = [
    'https://user:password@example.com/foo'],
 
   // No path at all
-  ['#hash1', '#hash2', '#hash1']
+  ['#hash1', '#hash2', '#hash1'],
 ];
-relativeTests2.forEach(function(relativeTest) {
+for (let i = 0; i < relativeTests2.length; i++) {
+  const relativeTest = relativeTests2[i];
+
   const a = url.resolve(relativeTest[1], relativeTest[0]);
   const e = url.format(relativeTest[2]);
   assert.strictEqual(a, e,
                      `resolve(${relativeTest[0]}, ${relativeTest[1]})` +
                      ` == ${e}\n  actual=${a}`);
-});
+}
 
 // If format and parse are inverse operations then
 // resolveObject(parse(x), y) == parse(resolve(x, y))
 
 // format: [from, path, expected]
-relativeTests.forEach(function(relativeTest) {
+for (let i = 0; i < relativeTests.length; i++) {
+  const relativeTest = relativeTests[i];
+
   let actual = url.resolveObject(url.parse(relativeTest[0]), relativeTest[1]);
   let expected = url.parse(relativeTest[2]);
 
@@ -400,7 +405,8 @@ relativeTests.forEach(function(relativeTest) {
   assert.strictEqual(actual, expected,
                      `format(${actual}) == ${expected}\n` +
                      `actual: ${actual}`);
-});
+
+}
 
 // format: [to, from, result]
 // the test: ['.//g', 'f:/a', 'f://g'] is a fundamental problem
@@ -416,7 +422,9 @@ if (relativeTests2[181][0] === './/g' &&
     relativeTests2[181][2] === 'f://g') {
   relativeTests2.splice(181, 1);
 }
-relativeTests2.forEach(function(relativeTest) {
+for (let i = 0; i < relativeTests2.length; i++) {
+  const relativeTest = relativeTests2[i];
+
   let actual = url.resolveObject(url.parse(relativeTest[1]), relativeTest[0]);
   let expected = url.parse(relativeTest[2]);
 
@@ -432,4 +440,4 @@ relativeTests2.forEach(function(relativeTest) {
   assert.strictEqual(actual, expected,
                      `format(${relativeTest[1]}) == ${expected}\n` +
                      `actual: ${actual}`);
-});
+}

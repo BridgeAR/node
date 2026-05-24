@@ -3,12 +3,16 @@
 // found in the LICENSE file.
 
 #include "src/heap/spaces.h"
+
 #include <memory>
+
 #include "src/common/globals.h"
 #include "src/execution/isolate.h"
 #include "src/heap/heap-inl.h"
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/heap/heap.h"
+#include "src/heap/large-spaces.h"
+#include "src/heap/memory-chunk.h"
 #include "src/heap/spaces-inl.h"
 #include "test/unittests/test-utils.h"
 
@@ -24,7 +28,7 @@ TEST_F(SpacesTest, CompactionSpaceMerge) {
 
   CompactionSpace* compaction_space =
       new CompactionSpace(heap, OLD_SPACE, NOT_EXECUTABLE,
-                          LocalSpaceKind::kCompactionSpaceForMarkCompact);
+                          CompactionSpaceKind::kCompactionSpaceForMarkCompact);
   EXPECT_TRUE(compaction_space != nullptr);
 
   for (Page* p : *old_space) {
@@ -41,254 +45,31 @@ TEST_F(SpacesTest, CompactionSpaceMerge) {
   const int kExpectedPages =
       (kNumObjects + kNumObjectsPerPage - 1) / kNumObjectsPerPage;
   for (int i = 0; i < kNumObjects; i++) {
-    HeapObject object =
+    Tagged<HeapObject> object =
         compaction_space->AllocateRawUnaligned(kMaxRegularHeapObjectSize)
             .ToObjectChecked();
-    heap->CreateFillerObjectAt(object.address(), kMaxRegularHeapObjectSize,
-                               ClearRecordedSlots::kNo);
+    heap->CreateFillerObjectAt(object.address(), kMaxRegularHeapObjectSize);
   }
   int pages_in_old_space = old_space->CountTotalPages();
   int pages_in_compaction_space = compaction_space->CountTotalPages();
   EXPECT_EQ(kExpectedPages, pages_in_compaction_space);
-  old_space->MergeLocalSpace(compaction_space);
+  old_space->MergeCompactionSpace(compaction_space);
   EXPECT_EQ(pages_in_old_space + pages_in_compaction_space,
             old_space->CountTotalPages());
 
   delete compaction_space;
 }
 
-class OffThreadAllocationThread final : public base::Thread {
- public:
-  explicit OffThreadAllocationThread(Heap* heap)
-      : Thread(Options("OffThreadAllocationThread")), heap_(heap) {}
-  void Run() override {
-    off_thread_space_ = std::make_unique<OffThreadSpace>(heap_);
-    EXPECT_TRUE(off_thread_space_ != nullptr);
-
-    // Cannot loop until "Available()" since we initially have 0 bytes available
-    // and would thus neither grow, nor be able to allocate an object.
-    const int kNumObjects = 10;
-    const int kNumObjectsPerPage =
-        off_thread_space_->AreaSize() / kMaxRegularHeapObjectSize;
-    const int kExpectedPages =
-        (kNumObjects + kNumObjectsPerPage - 1) / kNumObjectsPerPage;
-    for (int i = 0; i < kNumObjects; i++) {
-      HeapObject object =
-          off_thread_space_->AllocateRawUnaligned(kMaxRegularHeapObjectSize)
-              .ToObjectChecked();
-      heap_->CreateFillerObjectAt(object.address(), kMaxRegularHeapObjectSize,
-                                  ClearRecordedSlots::kNo);
-    }
-    int pages_in_off_thread_space = off_thread_space_->CountTotalPages();
-    EXPECT_EQ(kExpectedPages, pages_in_off_thread_space);
-  }
-
-  OffThreadSpace* space() { return off_thread_space_.get(); }
-
- private:
-  Heap* heap_;
-  std::unique_ptr<OffThreadSpace> off_thread_space_;
-};
-
-TEST_F(SpacesTest, OffThreadSpaceAllocate) {
-  Heap* heap = i_isolate()->heap();
-
-  static const int kNumThreads = 10;
-  std::unique_ptr<OffThreadAllocationThread> threads[10];
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i] = std::make_unique<OffThreadAllocationThread>(heap);
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    CHECK(threads[i]->Start());
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i]->Join();
-  }
-}
-
-TEST_F(SpacesTest, OffThreadSpaceMerge) {
-  Heap* heap = i_isolate()->heap();
-  OldSpace* old_space = heap->old_space();
-  EXPECT_TRUE(old_space != nullptr);
-
-  static const int kNumThreads = 10;
-  std::unique_ptr<OffThreadAllocationThread> threads[10];
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i] = std::make_unique<OffThreadAllocationThread>(heap);
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    CHECK(threads[i]->Start());
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i]->Join();
-  }
-
-  int pages_in_old_space = old_space->CountTotalPages();
-
-  int expected_merged_pages = 0;
-  for (int i = 0; i < kNumThreads; ++i) {
-    int pages_in_off_thread_space = threads[i]->space()->CountTotalPages();
-
-    old_space->MergeLocalSpace(threads[i]->space());
-    expected_merged_pages += pages_in_off_thread_space;
-  }
-
-  EXPECT_EQ(pages_in_old_space + expected_merged_pages,
-            old_space->CountTotalPages());
-}
-
-TEST_F(SpacesTest, OffThreadSpaceMergeDuringIncrementalMarking) {
-  Heap* heap = i_isolate()->heap();
-  OldSpace* old_space = heap->old_space();
-  EXPECT_TRUE(old_space != nullptr);
-
-  static const int kNumThreads = 10;
-  std::unique_ptr<OffThreadAllocationThread> threads[10];
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i] = std::make_unique<OffThreadAllocationThread>(heap);
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    CHECK(threads[i]->Start());
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i]->Join();
-  }
-
-  heap->StartIncrementalMarking(Heap::kNoGCFlags,
-                                GarbageCollectionReason::kTesting);
-
-  int pages_in_old_space = old_space->CountTotalPages();
-
-  int expected_merged_pages = 0;
-  for (int i = 0; i < kNumThreads; ++i) {
-    int pages_in_off_thread_space = threads[i]->space()->CountTotalPages();
-
-    old_space->MergeLocalSpace(threads[i]->space());
-    expected_merged_pages += pages_in_off_thread_space;
-  }
-
-  heap->FinalizeIncrementalMarkingAtomically(GarbageCollectionReason::kTesting);
-
-  EXPECT_EQ(pages_in_old_space + expected_merged_pages,
-            old_space->CountTotalPages());
-}
-
-class LargeOffThreadAllocationThread final : public base::Thread {
- public:
-  explicit LargeOffThreadAllocationThread(Heap* heap)
-      : Thread(Options("LargeOffThreadAllocationThread")), heap_(heap) {}
-  void Run() override {
-    off_thread_lo_space_ = std::make_unique<OffThreadLargeObjectSpace>(heap_);
-    EXPECT_TRUE(off_thread_lo_space_ != nullptr);
-
-    const int kNumObjects = 10;
-    const int kExpectedPages = kNumObjects;
-    for (int i = 0; i < kNumObjects; i++) {
-      HeapObject object =
-          off_thread_lo_space_
-              ->AllocateRaw(kMaxRegularHeapObjectSize + kTaggedSize)
-              .ToObjectChecked();
-      heap_->CreateFillerObjectAt(object.address(),
-                                  kMaxRegularHeapObjectSize + kTaggedSize,
-                                  ClearRecordedSlots::kNo);
-    }
-    int pages_in_off_thread_space = off_thread_lo_space_->PageCount();
-    EXPECT_EQ(kExpectedPages, pages_in_off_thread_space);
-  }
-
-  OffThreadLargeObjectSpace* space() { return off_thread_lo_space_.get(); }
-
- private:
-  Heap* heap_;
-  std::unique_ptr<OffThreadLargeObjectSpace> off_thread_lo_space_;
-};
-
-TEST_F(SpacesTest, OffThreadLargeObjectSpaceAllocate) {
-  Heap* heap = i_isolate()->heap();
-
-  static const int kNumThreads = 10;
-  std::unique_ptr<LargeOffThreadAllocationThread> threads[10];
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i] = std::make_unique<LargeOffThreadAllocationThread>(heap);
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    CHECK(threads[i]->Start());
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i]->Join();
-  }
-}
-
-TEST_F(SpacesTest, OffThreadLargeObjectSpaceMerge) {
-  Heap* heap = i_isolate()->heap();
-  OldLargeObjectSpace* lo_space = heap->lo_space();
-  EXPECT_TRUE(lo_space != nullptr);
-
-  static const int kNumThreads = 10;
-  std::unique_ptr<LargeOffThreadAllocationThread> threads[10];
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i] = std::make_unique<LargeOffThreadAllocationThread>(heap);
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    CHECK(threads[i]->Start());
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i]->Join();
-  }
-
-  int pages_in_old_space = lo_space->PageCount();
-
-  int expected_merged_pages = 0;
-  for (int i = 0; i < kNumThreads; ++i) {
-    int pages_in_off_thread_space = threads[i]->space()->PageCount();
-
-    lo_space->MergeOffThreadSpace(threads[i]->space());
-    expected_merged_pages += pages_in_off_thread_space;
-  }
-
-  EXPECT_EQ(pages_in_old_space + expected_merged_pages, lo_space->PageCount());
-}
-
-TEST_F(SpacesTest, OffThreadLargeObjectSpaceMergeDuringIncrementalMarking) {
-  Heap* heap = i_isolate()->heap();
-  OldLargeObjectSpace* lo_space = heap->lo_space();
-  EXPECT_TRUE(lo_space != nullptr);
-
-  static const int kNumThreads = 10;
-  std::unique_ptr<LargeOffThreadAllocationThread> threads[10];
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i] = std::make_unique<LargeOffThreadAllocationThread>(heap);
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    CHECK(threads[i]->Start());
-  }
-  for (int i = 0; i < kNumThreads; ++i) {
-    threads[i]->Join();
-  }
-
-  int pages_in_old_space = lo_space->PageCount();
-
-  int expected_merged_pages = 0;
-  for (int i = 0; i < kNumThreads; ++i) {
-    int pages_in_off_thread_space = threads[i]->space()->PageCount();
-
-    lo_space->MergeOffThreadSpace(threads[i]->space());
-    expected_merged_pages += pages_in_off_thread_space;
-  }
-
-  EXPECT_EQ(pages_in_old_space + expected_merged_pages, lo_space->PageCount());
-}
-
 TEST_F(SpacesTest, WriteBarrierFromHeapObject) {
   constexpr Address address1 = Page::kPageSize;
-  HeapObject object1 = HeapObject::unchecked_cast(Object(address1));
-  MemoryChunk* chunk1 = MemoryChunk::FromHeapObject(object1);
+  Tagged<HeapObject> object1 = HeapObject::unchecked_cast(Object(address1));
+  BasicMemoryChunk* chunk1 = BasicMemoryChunk::FromHeapObject(object1);
   heap_internals::MemoryChunk* slim_chunk1 =
       heap_internals::MemoryChunk::FromHeapObject(object1);
   EXPECT_EQ(static_cast<void*>(chunk1), static_cast<void*>(slim_chunk1));
   constexpr Address address2 = 2 * Page::kPageSize - 1;
-  HeapObject object2 = HeapObject::unchecked_cast(Object(address2));
-  MemoryChunk* chunk2 = MemoryChunk::FromHeapObject(object2);
+  Tagged<HeapObject> object2 = HeapObject::unchecked_cast(Object(address2));
+  BasicMemoryChunk* chunk2 = BasicMemoryChunk::FromHeapObject(object2);
   heap_internals::MemoryChunk* slim_chunk2 =
       heap_internals::MemoryChunk::FromHeapObject(object2);
   EXPECT_EQ(static_cast<void*>(chunk2), static_cast<void*>(slim_chunk2));
@@ -347,10 +128,14 @@ TEST_F(SpacesTest, WriteBarrierInYoungGenerationFromSpace) {
 
 TEST_F(SpacesTest, CodeRangeAddressReuse) {
   CodeRangeAddressHint hint;
+  const size_t base_alignment = MemoryChunk::kPageSize;
   // Create code ranges.
-  Address code_range1 = hint.GetAddressHint(100);
-  Address code_range2 = hint.GetAddressHint(200);
-  Address code_range3 = hint.GetAddressHint(100);
+  Address code_range1 = hint.GetAddressHint(100, base_alignment);
+  CHECK(IsAligned(code_range1, base_alignment));
+  Address code_range2 = hint.GetAddressHint(200, base_alignment);
+  CHECK(IsAligned(code_range2, base_alignment));
+  Address code_range3 = hint.GetAddressHint(100, base_alignment);
+  CHECK(IsAligned(code_range3, base_alignment));
 
   // Since the addresses are random, we cannot check that they are different.
 
@@ -359,14 +144,14 @@ TEST_F(SpacesTest, CodeRangeAddressReuse) {
   hint.NotifyFreedCodeRange(code_range2, 200);
 
   // The next two code ranges should reuse the freed addresses.
-  Address code_range4 = hint.GetAddressHint(100);
+  Address code_range4 = hint.GetAddressHint(100, base_alignment);
   EXPECT_EQ(code_range4, code_range1);
-  Address code_range5 = hint.GetAddressHint(200);
+  Address code_range5 = hint.GetAddressHint(200, base_alignment);
   EXPECT_EQ(code_range5, code_range2);
 
   // Free the third code range and check address reuse.
   hint.NotifyFreedCodeRange(code_range3, 100);
-  Address code_range6 = hint.GetAddressHint(100);
+  Address code_range6 = hint.GetAddressHint(100, base_alignment);
   EXPECT_EQ(code_range6, code_range3);
 }
 
@@ -407,15 +192,16 @@ TEST_F(SpacesTest, FreeListManySelectFreeListCategoryType) {
     }
 
     for (size_t size : sizes) {
-      FreeListCategoryType cat = free_list.SelectFreeListCategoryType(size);
-      if (cat == free_list.last_category_) {
-        // If cat == last_category, then we make sure that |size| indeeds fits
-        // in the last category.
-        EXPECT_LE(free_list.categories_min[cat], size);
+      FreeListCategoryType selected =
+          free_list.SelectFreeListCategoryType(size);
+      if (selected == free_list.last_category_) {
+        // If selected == last_category, then we make sure that |size| indeeds
+        // fits in the last category.
+        EXPECT_LE(free_list.categories_min[selected], size);
       } else {
-        // Otherwise, size should fit in |cat|, but not in |cat+1|.
-        EXPECT_LE(free_list.categories_min[cat], size);
-        EXPECT_LT(size, free_list.categories_min[cat + 1]);
+        // Otherwise, size should fit in |selected|, but not in |selected+1|.
+        EXPECT_LE(free_list.categories_min[selected], size);
+        EXPECT_LT(size, free_list.categories_min[selected + 1]);
       }
     }
   }
@@ -486,25 +272,26 @@ TEST_F(SpacesTest,
     }
 
     for (size_t size : sizes) {
-      FreeListCategoryType cat =
+      FreeListCategoryType selected =
           free_list.SelectFastAllocationFreeListCategoryType(size);
       if (size <= FreeListManyCachedFastPath::kTinyObjectMaxSize) {
         // For tiny objects, the first category of the fast path should be
         // chosen.
-        EXPECT_TRUE(cat == FreeListManyCachedFastPath::kFastPathFirstCategory);
+        EXPECT_TRUE(selected ==
+                    FreeListManyCachedFastPath::kFastPathFirstCategory);
       } else if (size >= free_list.categories_min[free_list.last_category_] -
                              FreeListManyCachedFastPath::kFastPathOffset) {
         // For objects close to the minimum of the last category, the last
         // category is chosen.
-        EXPECT_EQ(cat, free_list.last_category_);
+        EXPECT_EQ(selected, free_list.last_category_);
       } else {
         // For other objects, the chosen category must satisfy that its minimum
         // is at least |size|+1.85k.
-        EXPECT_GE(free_list.categories_min[cat],
+        EXPECT_GE(free_list.categories_min[selected],
                   size + FreeListManyCachedFastPath::kFastPathOffset);
         // And the smaller categoriy's minimum is less than |size|+1.85k
         // (otherwise it would have been chosen instead).
-        EXPECT_LT(free_list.categories_min[cat - 1],
+        EXPECT_LT(free_list.categories_min[selected - 1],
                   size + FreeListManyCachedFastPath::kFastPathOffset);
       }
     }

@@ -5,7 +5,7 @@
 #ifndef V8_INSPECTOR_TEST_INTERFACE_H_
 #define V8_INSPECTOR_TEST_INTERFACE_H_
 
-#include "include/v8.h"
+#include "include/v8config.h"
 
 namespace v8_inspector {
 
@@ -14,6 +14,6 @@ class V8Inspector;
 V8_EXPORT void SetMaxAsyncTaskStacksForTest(V8Inspector* inspector, int limit);
 V8_EXPORT void DumpAsyncTaskStacksStateForTest(V8Inspector* inspector);
 
-}  //  v8_inspector
+}  // namespace v8_inspector
 
 #endif  // V8_INSPECTOR_TEST_INTERFACE_H_

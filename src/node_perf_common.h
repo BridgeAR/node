@@ -3,11 +3,13 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
+#include "aliased_buffer.h"
 #include "node.h"
 #include "uv.h"
 #include "v8.h"
 
 #include <algorithm>
+#include <iostream>
 #include <map>
 #include <string>
 
@@ -18,25 +20,25 @@ namespace performance {
 
 // These occur before the environment is created. Cache them
 // here and add them to the milestones when the env is init'd.
+extern const uint64_t performance_process_start;
+extern const double performance_process_start_timestamp;
 extern uint64_t performance_v8_start;
 
-#define NODE_PERFORMANCE_MILESTONES(V)                                        \
-  V(ENVIRONMENT, "environment")                                               \
-  V(NODE_START, "nodeStart")                                                  \
-  V(V8_START, "v8Start")                                                      \
-  V(LOOP_START, "loopStart")                                                  \
-  V(LOOP_EXIT, "loopExit")                                                    \
+#define NODE_PERFORMANCE_MILESTONES(V)                                         \
+  V(TIME_ORIGIN, "timeOrigin")                                                 \
+  V(ENVIRONMENT, "environment")                                                \
+  V(NODE_START, "nodeStart")                                                   \
+  V(V8_START, "v8Start")                                                       \
+  V(LOOP_START, "loopStart")                                                   \
+  V(LOOP_EXIT, "loopExit")                                                     \
   V(BOOTSTRAP_COMPLETE, "bootstrapComplete")
 
-
 #define NODE_PERFORMANCE_ENTRY_TYPES(V)                                       \
-  V(NODE, "node")                                                             \
-  V(MARK, "mark")                                                             \
-  V(MEASURE, "measure")                                                       \
   V(GC, "gc")                                                                 \
-  V(FUNCTION, "function")                                                     \
+  V(HTTP, "http")                                                             \
   V(HTTP2, "http2")                                                           \
-  V(HTTP, "http")
+  V(NET, "net")                                                               \
+  V(DNS, "dns")
 
 enum PerformanceMilestone {
 #define V(name, _) NODE_PERFORMANCE_MILESTONE_##name,
@@ -54,34 +56,33 @@ enum PerformanceEntryType {
 
 class PerformanceState {
  public:
-  explicit PerformanceState(v8::Isolate* isolate) :
-    root(
-      isolate,
-      sizeof(performance_state_internal)),
-    milestones(
-      isolate,
-      offsetof(performance_state_internal, milestones),
-      NODE_PERFORMANCE_MILESTONE_INVALID,
-      root),
-    observers(
-      isolate,
-      offsetof(performance_state_internal, observers),
-      NODE_PERFORMANCE_ENTRY_TYPE_INVALID,
-      root) {
-    for (size_t i = 0; i < milestones.Length(); i++)
-      milestones[i] = -1.;
-  }
+  struct SerializeInfo {
+    AliasedBufferIndex root;
+    AliasedBufferIndex milestones;
+    AliasedBufferIndex observers;
+  };
+
+  explicit PerformanceState(v8::Isolate* isolate,
+                            uint64_t time_origin,
+                            const SerializeInfo* info);
+  SerializeInfo Serialize(v8::Local<v8::Context> context,
+                          v8::SnapshotCreator* creator);
+  void Deserialize(v8::Local<v8::Context> context, uint64_t time_origin);
+  friend std::ostream& operator<<(std::ostream& o, const SerializeInfo& i);
 
   AliasedUint8Array root;
   AliasedFloat64Array milestones;
   AliasedUint32Array observers;
 
   uint64_t performance_last_gc_start_mark = 0;
+  uint16_t current_gc_type = 0;
 
   void Mark(enum PerformanceMilestone milestone,
             uint64_t ts = PERFORMANCE_NOW());
 
  private:
+  void Initialize(uint64_t time_origin);
+  void ResetMilestones();
   struct performance_state_internal {
     // doubles first so that they are always sizeof(double)-aligned
     double milestones[NODE_PERFORMANCE_MILESTONE_INVALID];

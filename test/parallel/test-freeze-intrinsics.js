@@ -27,4 +27,22 @@ assert.throws(
   const o = {};
   o.toString = () => 'Custom toString';
   assert.strictEqual(o + 'asdf', 'Custom toStringasdf');
+  assert.strictEqual(Object.getOwnPropertyDescriptor(o, 'toString').enumerable,
+                     true);
+}
+
+// Ensure we can not override globalThis
+{
+  assert.throws(() => { globalThis.globalThis = null; },
+                { name: 'TypeError' });
+  assert.strictEqual(globalThis.globalThis, globalThis);
+}
+
+// Ensure that we cannot override console properties.
+{
+  const { log } = console;
+
+  assert.throws(() => { console.log = null; },
+                { name: 'TypeError' });
+  assert.strictEqual(console.log, log);
 }

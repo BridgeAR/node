@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax
+// Force TurboFan code for serialization.
+// Flags: --allow-natives-syntax --no-liftoff --no-wasm-lazy-compilation
 
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 // The number of locals must be greater than the constant defined here:
 // https://cs.chromium.org/chromium/src/v8/src/compiler/x64/code-generator-x64.cc?l=3146
@@ -39,7 +40,7 @@ builder.addImport('mod', 'get', kSig_i_v);
 builder.addImport('mod', 'call', kSig_v_i);
 builder.
   addFunction('main', kSig_v_v).
-  addLocals({i32_count: kNumLocals}).
+  addLocals(kWasmI32, kNumLocals).
   addBody(body).
   exportAs('main');
 let m1_bytes = builder.toBuffer();

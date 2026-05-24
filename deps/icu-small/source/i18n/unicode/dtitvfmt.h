@@ -31,6 +31,7 @@
 #include "unicode/dtitvinf.h"
 #include "unicode/dtptngen.h"
 #include "unicode/formattedvalue.h"
+#include "unicode/udisplaycontext.h"
 
 U_NAMESPACE_BEGIN
 
@@ -67,13 +68,13 @@ class U_I18N_API FormattedDateInterval : public UMemory, public FormattedValue {
      * Move constructor: Leaves the source FormattedDateInterval in an undefined state.
      * @stable ICU 64
      */
-    FormattedDateInterval(FormattedDateInterval&& src) U_NOEXCEPT;
+    FormattedDateInterval(FormattedDateInterval&& src) noexcept;
 
     /**
      * Destruct an instance of FormattedDateInterval.
      * @stable ICU 64
      */
-    virtual ~FormattedDateInterval() U_OVERRIDE;
+    virtual ~FormattedDateInterval() override;
 
     /** Copying not supported; use move constructor instead. */
     FormattedDateInterval(const FormattedDateInterval&) = delete;
@@ -85,19 +86,19 @@ class U_I18N_API FormattedDateInterval : public UMemory, public FormattedValue {
      * Move assignment: Leaves the source FormattedDateInterval in an undefined state.
      * @stable ICU 64
      */
-    FormattedDateInterval& operator=(FormattedDateInterval&& src) U_NOEXCEPT;
+    FormattedDateInterval& operator=(FormattedDateInterval&& src) noexcept;
 
     /** @copydoc FormattedValue::toString() */
-    UnicodeString toString(UErrorCode& status) const U_OVERRIDE;
+    UnicodeString toString(UErrorCode& status) const override;
 
     /** @copydoc FormattedValue::toTempString() */
-    UnicodeString toTempString(UErrorCode& status) const U_OVERRIDE;
+    UnicodeString toTempString(UErrorCode& status) const override;
 
     /** @copydoc FormattedValue::appendTo() */
-    Appendable &appendTo(Appendable& appendable, UErrorCode& status) const U_OVERRIDE;
+    Appendable &appendTo(Appendable& appendable, UErrorCode& status) const override;
 
     /** @copydoc FormattedValue::nextPosition() */
-    UBool nextPosition(ConstrainedFieldPosition& cfpos, UErrorCode& status) const U_OVERRIDE;
+    UBool nextPosition(ConstrainedFieldPosition& cfpos, UErrorCode& status) const override;
 
   private:
     FormattedDateIntervalData *fData;
@@ -433,7 +434,7 @@ public:
      * @return    A copy of the object.
      * @stable ICU 4.0
      */
-    virtual DateIntervalFormat* clone() const;
+    virtual DateIntervalFormat* clone() const override;
 
     /**
      * Return true if the given Format objects are semantically equal. Objects
@@ -442,7 +443,7 @@ public:
      * @return         true if the given Format objects are semantically equal.
      * @stable ICU 4.0
      */
-    virtual UBool operator==(const Format& other) const;
+    virtual bool operator==(const Format& other) const override;
 
     /**
      * Return true if the given Format objects are not semantically equal.
@@ -451,7 +452,7 @@ public:
      * @return      true if the given Format objects are not semantically equal.
      * @stable ICU 4.0
      */
-    UBool operator!=(const Format& other) const;
+    bool operator!=(const Format& other) const;
 
 
     using Format::format;
@@ -478,7 +479,7 @@ public:
     virtual UnicodeString& format(const Formattable& obj,
                                   UnicodeString& appendTo,
                                   FieldPosition& fieldPosition,
-                                  UErrorCode& status) const ;
+                                  UErrorCode& status) const override;
 
 
 
@@ -587,14 +588,14 @@ public:
      *                  If parse fails, return contents are undefined.
      * @param parse_pos The position to start parsing at. Since no parsing
      *                  is supported, upon return this param is unchanged.
-     * @return          A newly created Formattable* object, or NULL
+     * @return          A newly created Formattable* object, or nullptr
      *                  on failure.  The caller owns this and should
      *                  delete it when done.
      * @internal ICU 4.0
      */
     virtual void parseObject(const UnicodeString& source,
                              Formattable& result,
-                             ParsePosition& parse_pos) const;
+                             ParsePosition& parse_pos) const override;
 
 
     /**
@@ -652,6 +653,32 @@ public:
     virtual void setTimeZone(const TimeZone& zone);
 
     /**
+     * Set a particular UDisplayContext value in the formatter, such as
+     * UDISPCTX_CAPITALIZATION_FOR_STANDALONE. This causes the formatted
+     * result to be capitalized appropriately for the context in which
+     * it is intended to be used, considering both the locale and the
+     * type of field at the beginning of the formatted result.
+     * @param value The UDisplayContext value to set.
+     * @param status Input/output status. If at entry this indicates a failure
+     *               status, the function will do nothing; otherwise this will be
+     *               updated with any new status from the function.
+     * @stable ICU 68
+     */
+    virtual void setContext(UDisplayContext value, UErrorCode& status);
+
+    /**
+     * Get the formatter's UDisplayContext value for the specified UDisplayContextType,
+     * such as UDISPCTX_TYPE_CAPITALIZATION.
+     * @param type The UDisplayContextType whose value to return
+     * @param status Input/output status. If at entry this indicates a failure
+     *               status, the function will do nothing; otherwise this will be
+     *               updated with any new status from the function.
+     * @return The UDisplayContextValue for the specified type.
+     * @stable ICU 68
+     */
+    virtual UDisplayContext getContext(UDisplayContextType type, UErrorCode& status) const;
+
+    /**
      * Return the class ID for this class. This is useful only for comparing to
      * a return value from getDynamicClassID(). For example:
      * <pre>
@@ -675,7 +702,7 @@ public:
      *                  other classes have different class IDs.
      * @stable ICU 4.0
      */
-    virtual UClassID getDynamicClassID(void) const;
+    virtual UClassID getDynamicClassID(void) const override;
 
 protected:
 
@@ -713,7 +740,7 @@ private:
          * Whether the first date in interval pattern is later date or not.
          * Fallback format set the default ordering.
          * And for a particular interval pattern, the order can be
-         * overriden by prefixing the interval pattern with "latestFirst:" or
+         * overridden by prefixing the interval pattern with "latestFirst:" or
          * "earliestFirst:"
          * For example, given 2 date, Jan 10, 2007 to Feb 10, 2007.
          * if the fallback format is "{0} - {1}",
@@ -796,7 +823,7 @@ private:
      *                          to be formatted into date interval string
      * @param toCalendar        calendar set to the to date in date interval
      *                          to be formatted into date interval string
-     * @param fromToOnSameDay   TRUE iff from and to dates are on the same day
+     * @param fromToOnSameDay   true iff from and to dates are on the same day
      *                          (any difference is in ampm/hours or below)
      * @param appendTo          Output parameter to receive result.
      *                          Result is appended to existing contents.
@@ -864,6 +891,19 @@ private:
     void setFallbackPattern(UCalendarDateFields field,
                             const UnicodeString& skeleton,
                             UErrorCode& status);
+    
+
+
+    /**
+     * Converts special hour metacharacters (such as 'j') in the skeleton into locale-appropriate
+     * pattern characters.
+     *
+     *
+     *  @param skeleton               The skeleton to convert
+     *  @return A copy of the skeleton, which "j" and any other special hour metacharacters converted to the regular ones.
+     *
+     */
+    UnicodeString normalizeHourMetacharacters(const UnicodeString& skeleton) const;
 
 
 
@@ -919,8 +959,8 @@ private:
      * @param dateSkeleton   normalized date skeleton
      * @param timeSkeleton   normalized time skeleton
      * @return               whether the resource is found for the skeleton.
-     *                       TRUE if interval pattern found for the skeleton,
-     *                       FALSE otherwise.
+     *                       true if interval pattern found for the skeleton,
+     *                       false otherwise.
      */
     UBool setSeparateDateTimePtn(const UnicodeString& dateSkeleton,
                                  const UnicodeString& timeSkeleton);
@@ -948,15 +988,15 @@ private:
      * @param extendedBestSkeleton  extended best match skeleton
      * @return                      whether the interval pattern is found
      *                              through extending skeleton or not.
-     *                              TRUE if interval pattern is found by
-     *                              extending skeleton, FALSE otherwise.
+     *                              true if interval pattern is found by
+     *                              extending skeleton, false otherwise.
      */
     UBool setIntervalPattern(UCalendarDateFields field,
                              const UnicodeString* skeleton,
                              const UnicodeString* bestSkeleton,
                              int8_t differenceInfo,
-                             UnicodeString* extendedSkeleton = NULL,
-                             UnicodeString* extendedBestSkeleton = NULL);
+                             UnicodeString* extendedSkeleton = nullptr,
+                             UnicodeString* extendedBestSkeleton = nullptr);
 
     /**
      * Adjust field width in best match interval pattern to match
@@ -984,6 +1024,7 @@ private:
      * @param differenceInfo           the difference between 2 skeletons
      *                                 1 means only field width differs
      *                                 2 means v/z exchange
+     * @param suppressDayPeriodField if true, remove the day period field from the pattern, if there is one
      * @param adjustedIntervalPattern  adjusted interval pattern
      */
     static void U_EXPORT2 adjustFieldWidth(
@@ -991,7 +1032,19 @@ private:
                             const UnicodeString& bestMatchSkeleton,
                             const UnicodeString& bestMatchIntervalPattern,
                             int8_t differenceInfo,
+                            UBool suppressDayPeriodField,
                             UnicodeString& adjustedIntervalPattern);
+
+    /**
+     * Does the same thing as UnicodeString::findAndReplace(), except that it won't perform
+     * the substitution inside quoted literal text.
+     * @param targetString The string to perform the find-replace operation on.
+     * @param strToReplace The string to search for and replace in the target string.
+     * @param strToReplaceWith The string to substitute in wherever `stringToReplace` was found.
+     */
+    static void U_EXPORT2 findReplaceInPattern(UnicodeString& targetString,
+                                               const UnicodeString& strToReplace,
+                                               const UnicodeString& strToReplaceWith);
 
     /**
      * Concat a single date pattern with a time interval pattern,
@@ -1137,9 +1190,14 @@ private:
     UnicodeString* fDatePattern;
     UnicodeString* fTimePattern;
     UnicodeString* fDateTimeFormat;
+
+    /**
+     * Other formatting information
+     */
+    UDisplayContext fCapitalizationContext;
 };
 
-inline UBool
+inline bool
 DateIntervalFormat::operator!=(const Format& other) const  {
     return !operator==(other);
 }

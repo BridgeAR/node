@@ -1,52 +1,47 @@
 'use strict';
 const common = require('../common');
 
-/*
- * These tests make sure that the `options` object passed to these functions are
- * never altered.
- *
- * Refer: https://github.com/nodejs/node/issues/7655
- */
+// These tests make sure that the `options` object passed to these functions are
+// never altered.
+//
+// Refer: https://github.com/nodejs/node/issues/7655
 
-const assert = require('assert');
 const fs = require('fs');
-const path = require('path');
 
-const errHandler = (e) => assert.ifError(e);
-const options = Object.freeze({});
+const options = common.mustNotMutateObjectDeep({});
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
-fs.readFile(__filename, options, common.mustCall(errHandler));
+fs.readFile(__filename, options, common.mustSucceed());
 fs.readFileSync(__filename, options);
 
-fs.readdir(__dirname, options, common.mustCall(errHandler));
+fs.readdir(__dirname, options, common.mustSucceed());
 fs.readdirSync(__dirname, options);
 
 if (common.canCreateSymLink()) {
-  const sourceFile = path.resolve(tmpdir.path, 'test-readlink');
-  const linkFile = path.resolve(tmpdir.path, 'test-readlink-link');
+  const sourceFile = tmpdir.resolve('test-readlink');
+  const linkFile = tmpdir.resolve('test-readlink-link');
 
   fs.writeFileSync(sourceFile, '');
   fs.symlinkSync(sourceFile, linkFile);
 
-  fs.readlink(linkFile, options, common.mustCall(errHandler));
+  fs.readlink(linkFile, options, common.mustSucceed());
   fs.readlinkSync(linkFile, options);
 }
 
 {
-  const fileName = path.resolve(tmpdir.path, 'writeFile');
+  const fileName = tmpdir.resolve('writeFile');
   fs.writeFileSync(fileName, 'ABCD', options);
-  fs.writeFile(fileName, 'ABCD', options, common.mustCall(errHandler));
+  fs.writeFile(fileName, 'ABCD', options, common.mustSucceed());
 }
 
 {
-  const fileName = path.resolve(tmpdir.path, 'appendFile');
+  const fileName = tmpdir.resolve('appendFile');
   fs.appendFileSync(fileName, 'ABCD', options);
-  fs.appendFile(fileName, 'ABCD', options, common.mustCall(errHandler));
+  fs.appendFile(fileName, 'ABCD', options, common.mustSucceed());
 }
 
-if (!common.isIBMi) { // IBMi does not suppport fs.watch()
+if (!common.isIBMi) { // IBMi does not support fs.watch()
   const watch = fs.watch(__filename, options, common.mustNotCall());
   watch.close();
 }
@@ -58,17 +53,17 @@ if (!common.isIBMi) { // IBMi does not suppport fs.watch()
 
 {
   fs.realpathSync(__filename, options);
-  fs.realpath(__filename, options, common.mustCall(errHandler));
+  fs.realpath(__filename, options, common.mustSucceed());
 }
 
 {
-  const tempFileName = path.resolve(tmpdir.path, 'mkdtemp-');
+  const tempFileName = tmpdir.resolve('mkdtemp-');
   fs.mkdtempSync(tempFileName, options);
-  fs.mkdtemp(tempFileName, options, common.mustCall(errHandler));
+  fs.mkdtemp(tempFileName, options, common.mustSucceed());
 }
 
 {
-  const fileName = path.resolve(tmpdir.path, 'streams');
+  const fileName = tmpdir.resolve('streams');
   fs.WriteStream(fileName, options).once('open', common.mustCall(() => {
     fs.ReadStream(fileName, options).destroy();
   })).end();

@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 
+#include "src/base/platform/mutex.h"
 #include "src/base/platform/time.h"
 #include "src/utils/allocation.h"
 
@@ -18,6 +19,7 @@ class OptimizedCompilationInfo;
 class CompilationStatistics;
 
 struct AsPrintableStatistics {
+  const char* compiler;
   const CompilationStatistics& s;
   const bool machine_output;
 };
@@ -25,20 +27,21 @@ struct AsPrintableStatistics {
 class CompilationStatistics final : public Malloced {
  public:
   CompilationStatistics() = default;
+  CompilationStatistics(const CompilationStatistics&) = delete;
+  CompilationStatistics& operator=(const CompilationStatistics&) = delete;
 
   class BasicStats {
    public:
-    BasicStats()
-        : total_allocated_bytes_(0),
-          max_allocated_bytes_(0),
-          absolute_max_allocated_bytes_(0) {}
-
     void Accumulate(const BasicStats& stats);
 
+    std::string AsJSON();
+
     base::TimeDelta delta_;
-    size_t total_allocated_bytes_;
-    size_t max_allocated_bytes_;
-    size_t absolute_max_allocated_bytes_;
+    size_t total_allocated_bytes_ = 0;
+    size_t max_allocated_bytes_ = 0;
+    size_t absolute_max_allocated_bytes_ = 0;
+    size_t input_graph_size_ = 0;
+    size_t output_graph_size_ = 0;
     std::string function_name_;
   };
 
@@ -48,13 +51,14 @@ class CompilationStatistics final : public Malloced {
   void RecordPhaseKindStats(const char* phase_kind_name,
                             const BasicStats& stats);
 
-  void RecordTotalStats(size_t source_size, const BasicStats& stats);
+  void RecordTotalStats(const BasicStats& stats);
 
  private:
   class TotalStats : public BasicStats {
    public:
-    TotalStats() : source_size_(0) {}
+    TotalStats() : source_size_(0), count_(0) {}
     uint64_t source_size_;
+    size_t count_;
   };
 
   class OrderedStats : public BasicStats {
@@ -81,8 +85,6 @@ class CompilationStatistics final : public Malloced {
   PhaseKindMap phase_kind_map_;
   PhaseMap phase_map_;
   base::Mutex record_mutex_;
-
-  DISALLOW_COPY_AND_ASSIGN(CompilationStatistics);
 };
 
 std::ostream& operator<<(std::ostream& os, const AsPrintableStatistics& s);

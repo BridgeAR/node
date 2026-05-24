@@ -14,42 +14,59 @@
 namespace v8 {
 namespace internal {
 
-void CodeCreateEventRecord::UpdateCodeMap(CodeMap* code_map) {
-  code_map->AddCode(instruction_start, entry, instruction_size);
+void CodeCreateEventRecord::UpdateCodeMap(
+    InstructionStreamMap* instruction_stream_map) {
+  instruction_stream_map->AddCode(instruction_start, entry, instruction_size);
 }
 
-
-void CodeMoveEventRecord::UpdateCodeMap(CodeMap* code_map) {
-  code_map->MoveCode(from_instruction_start, to_instruction_start);
+void CodeMoveEventRecord::UpdateCodeMap(
+    InstructionStreamMap* instruction_stream_map) {
+  instruction_stream_map->MoveCode(from_instruction_start,
+                                   to_instruction_start);
 }
 
-
-void CodeDisableOptEventRecord::UpdateCodeMap(CodeMap* code_map) {
-  CodeEntry* entry = code_map->FindEntry(instruction_start);
+void CodeDisableOptEventRecord::UpdateCodeMap(
+    InstructionStreamMap* instruction_stream_map) {
+  CodeEntry* entry = instruction_stream_map->FindEntry(instruction_start);
   if (entry != nullptr) {
     entry->set_bailout_reason(bailout_reason);
   }
 }
 
-
-void CodeDeoptEventRecord::UpdateCodeMap(CodeMap* code_map) {
-  CodeEntry* entry = code_map->FindEntry(instruction_start);
-  if (entry == nullptr) return;
-  std::vector<CpuProfileDeoptFrame> frames_vector(
-      deopt_frames, deopt_frames + deopt_frame_count);
-  entry->set_deopt_info(deopt_reason, deopt_id, std::move(frames_vector));
+void CodeDeoptEventRecord::UpdateCodeMap(
+    InstructionStreamMap* instruction_stream_map) {
+  CodeEntry* entry = instruction_stream_map->FindEntry(instruction_start);
+  if (entry != nullptr) {
+    std::vector<CpuProfileDeoptFrame> frames_vector(
+        deopt_frames, deopt_frames + deopt_frame_count);
+    entry->set_deopt_info(deopt_reason, deopt_id, std::move(frames_vector));
+  }
   delete[] deopt_frames;
 }
 
-
-void ReportBuiltinEventRecord::UpdateCodeMap(CodeMap* code_map) {
-  CodeEntry* entry = code_map->FindEntry(instruction_start);
-  if (!entry) {
-    // Code objects for builtins should already have been added to the map but
-    // some of them have been filtered out by CpuProfiler.
+void ReportBuiltinEventRecord::UpdateCodeMap(
+    InstructionStreamMap* instruction_stream_map) {
+  CodeEntry* entry = instruction_stream_map->FindEntry(instruction_start);
+  if (entry) {
+    entry->SetBuiltinId(builtin);
     return;
   }
-  entry->SetBuiltinId(builtin_id);
+#if V8_ENABLE_WEBASSEMBLY
+  if (builtin == Builtin::kJSToWasmWrapper) {
+    // Make sure to add the generic js-to-wasm wrapper builtin, because that
+    // one is supposed to show up in profiles.
+    entry = instruction_stream_map->code_entries().Create(
+        LogEventListener::CodeTag::kBuiltin, "js-to-wasm");
+    instruction_stream_map->AddCode(instruction_start, entry, instruction_size);
+  }
+  if (builtin == Builtin::kWasmToJsWrapperCSA) {
+    // Make sure to add the generic wasm-to-js wrapper builtin, because that
+    // one is supposed to show up in profiles.
+    entry = instruction_stream_map->code_entries().Create(
+        LogEventListener::CodeTag::kBuiltin, "wasm-to-js");
+    instruction_stream_map->AddCode(instruction_start, entry, instruction_size);
+  }
+#endif  // V8_ENABLE_WEBASSEMBLY
 }
 
 TickSample* SamplingEventsProcessor::StartTickSample() {
@@ -58,6 +75,12 @@ TickSample* SamplingEventsProcessor::StartTickSample() {
   TickSampleEventRecord* evt =
       new (address) TickSampleEventRecord(last_code_event_id_);
   return &evt->sample;
+}
+
+void CodeDeleteEventRecord::UpdateCodeMap(
+    InstructionStreamMap* instruction_stream_map) {
+  bool removed = instruction_stream_map->RemoveCode(entry);
+  CHECK(removed);
 }
 
 void SamplingEventsProcessor::FinishTickSample() {

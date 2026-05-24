@@ -5,7 +5,6 @@
 #ifndef V8_SNAPSHOT_EMBEDDED_PLATFORM_EMBEDDED_FILE_WRITER_GENERIC_H_
 #define V8_SNAPSHOT_EMBEDDED_PLATFORM_EMBEDDED_FILE_WRITER_GENERIC_H_
 
-#include "src/base/macros.h"
 #include "src/common/globals.h"  // For V8_OS_WIN_X64
 #include "src/snapshot/embedded/platform-embedded-file-writer-base.h"
 
@@ -24,22 +23,20 @@ class PlatformEmbeddedFileWriterGeneric
   }
 
   void SectionText() override;
-  void SectionData() override;
   void SectionRoData() override;
 
   void AlignToCodeAlignment() override;
+  void AlignToPageSizeIfNeeded() override;
   void AlignToDataAlignment() override;
 
   void DeclareUint32(const char* name, uint32_t value) override;
-  void DeclarePointerToSymbol(const char* name, const char* target) override;
 
+  void DeclareSymbolGlobal(const char* name) override;
   void DeclareLabel(const char* name) override;
 
   void SourceInfo(int fileid, const char* filename, int line) override;
   void DeclareFunctionBegin(const char* name, uint32_t size) override;
   void DeclareFunctionEnd(const char* name) override;
-
-  int HexLiteral(uint64_t value) override;
 
   void Comment(const char* string) override;
 
@@ -49,8 +46,7 @@ class PlatformEmbeddedFileWriterGeneric
 
   int IndentedDataDirective(DataDirective directive) override;
 
- private:
-  void DeclareSymbolGlobal(const char* name);
+  DataDirective ByteChunkDataDirective() const override;
 
  private:
   const EmbeddedTargetArch target_arch_;

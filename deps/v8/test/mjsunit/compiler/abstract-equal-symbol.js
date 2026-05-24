@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --opt --noalways-opt
+// Flags: --allow-natives-syntax --turbofan --noalways-turbofan
 
 // Known symbols abstract equality.
 (function() {
@@ -47,6 +47,9 @@
   assertFalse(foo(a));
   %OptimizeFunctionOnNextCall(foo);
   assertTrue(foo(b));
+  // Re-prepare the function immediately to make sure type feedback isn't
+  // cleared by untimely gc, as re-optimization on new feedback is tested below
+  %PrepareFunctionForOptimization(foo);
   assertFalse(foo(a));
   assertOptimized(foo);
 
@@ -55,7 +58,6 @@
   assertUnoptimized(foo);
 
   // Make sure TurboFan learns the new feedback
-  %PrepareFunctionForOptimization(foo);
   %OptimizeFunctionOnNextCall(foo);
   assertFalse(foo("a"));
   assertOptimized(foo);

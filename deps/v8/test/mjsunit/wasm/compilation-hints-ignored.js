@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 (function testIgnoreCompilationHintsSectionUnlessEnabled() {
   print(arguments.callee.name);
@@ -13,8 +13,8 @@ load('test/mjsunit/wasm/wasm-module-builder.js');
                    kExprLocalGet, 0,
                    kExprCallFunction, 0])
          .setCompilationHint(kCompilationHintStrategyDefault,
-                             kCompilationHintTierInterpreter,
-                             kCompilationHintTierInterpreter)
+                             kCompilationHintTierBaseline,
+                             kCompilationHintTierBaseline)
          .exportFunc();
   let instance = builder.instantiate({mod: {pow: Math.pow}});
   assertEquals(27, instance.exports.upow(3))

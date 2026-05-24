@@ -14,7 +14,7 @@ namespace v8_inspector {
 
 namespace ConsoleAgentState {
 static const char consoleEnabled[] = "consoleEnabled";
-}
+}  // namespace ConsoleAgentState
 
 V8ConsoleAgentImpl::V8ConsoleAgentImpl(
     V8InspectorSessionImpl* session, protocol::FrontendChannel* frontendChannel,
@@ -30,14 +30,12 @@ Response V8ConsoleAgentImpl::enable() {
   if (m_enabled) return Response::Success();
   m_state->setBoolean(ConsoleAgentState::consoleEnabled, true);
   m_enabled = true;
-  m_session->inspector()->enableStackCapturingIfNeeded();
   reportAllMessages();
   return Response::Success();
 }
 
 Response V8ConsoleAgentImpl::disable() {
   if (!m_enabled) return Response::Success();
-  m_session->inspector()->disableStackCapturingIfNeeded();
   m_state->setBoolean(ConsoleAgentState::consoleEnabled, false);
   m_enabled = false;
   return Response::Success();

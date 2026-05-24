@@ -18,12 +18,12 @@
 namespace v8 {
 namespace internal {
 
-OBJECT_CONSTRUCTORS_IMPL(JSCollator, JSObject)
+#include "torque-generated/src/objects/js-collator-tq-inl.inc"
 
-ACCESSORS(JSCollator, icu_collator, Managed<icu::Collator>, kIcuCollatorOffset)
-ACCESSORS(JSCollator, bound_compare, Object, kBoundCompareOffset)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSCollator)
 
-CAST_ACCESSOR(JSCollator)
+ACCESSORS(JSCollator, icu_collator, Tagged<Managed<icu::Collator>>,
+          kIcuCollatorOffset)
 
 }  // namespace internal
 }  // namespace v8

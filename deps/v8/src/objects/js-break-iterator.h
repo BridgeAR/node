@@ -15,7 +15,6 @@
 #include "src/objects/intl-objects.h"
 #include "src/objects/managed.h"
 #include "src/objects/objects.h"
-#include "torque-generated/field-offsets-tq.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -27,7 +26,10 @@ class BreakIterator;
 namespace v8 {
 namespace internal {
 
-class JSV8BreakIterator : public JSObject {
+#include "torque-generated/src/objects/js-break-iterator-tq.inc"
+
+class JSV8BreakIterator
+    : public TorqueGeneratedJSV8BreakIterator<JSV8BreakIterator, JSObject> {
  public:
   V8_WARN_UNUSED_RESULT static MaybeHandle<JSV8BreakIterator> New(
       Isolate* isolate, Handle<Map> map, Handle<Object> input_locales,
@@ -48,28 +50,15 @@ class JSV8BreakIterator : public JSObject {
                               Handle<JSV8BreakIterator> break_iterator);
   static Handle<Object> Next(Isolate* isolate,
                              Handle<JSV8BreakIterator> break_iterator);
-  static String BreakType(Isolate* isolate,
-                          Handle<JSV8BreakIterator> break_iterator);
+  static Tagged<String> BreakType(Isolate* isolate,
+                                  Handle<JSV8BreakIterator> break_iterator);
 
-  DECL_CAST(JSV8BreakIterator)
   DECL_PRINTER(JSV8BreakIterator)
-  DECL_VERIFIER(JSV8BreakIterator)
 
-  DECL_ACCESSORS(locale, String)
-  DECL_ACCESSORS(break_iterator, Managed<icu::BreakIterator>)
-  DECL_ACCESSORS(unicode_string, Managed<icu::UnicodeString>)
-  DECL_ACCESSORS(bound_adopt_text, Object)
-  DECL_ACCESSORS(bound_first, Object)
-  DECL_ACCESSORS(bound_next, Object)
-  DECL_ACCESSORS(bound_current, Object)
-  DECL_ACCESSORS(bound_break_type, Object)
+  DECL_ACCESSORS(break_iterator, Tagged<Managed<icu::BreakIterator>>)
+  DECL_ACCESSORS(unicode_string, Tagged<Managed<icu::UnicodeString>>)
 
-  // Layout description.
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                TORQUE_GENERATED_JS_V8_BREAK_ITERATOR_FIELDS)
-
- private:
-  OBJECT_CONSTRUCTORS(JSV8BreakIterator, JSObject);
+  TQ_OBJECT_CONSTRUCTORS(JSV8BreakIterator)
 };
 
 }  // namespace internal

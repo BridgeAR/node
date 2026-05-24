@@ -30,6 +30,9 @@ BasicBlock::BasicBlock(Zone* zone, Id id)
 #if DEBUG
       debug_info_(AssemblerDebugInfo(nullptr, nullptr, -1)),
 #endif
+#ifdef LOG_BUILTIN_BLOCK_COUNT
+      pgo_execution_count_(0),
+#endif
       id_(id) {
 }
 
@@ -104,10 +107,10 @@ BasicBlock* BasicBlock::GetCommonDominator(BasicBlock* b1, BasicBlock* b2) {
   return b1;
 }
 
-void BasicBlock::Print() { StdoutStream{} << this; }
+void BasicBlock::Print() { StdoutStream{} << *this << "\n"; }
 
 std::ostream& operator<<(std::ostream& os, const BasicBlock& block) {
-  os << "B" << block.id();
+  os << "id:" << block.id();
 #if DEBUG
   AssemblerDebugInfo info = block.debug_info();
   if (info.name) os << info;
@@ -117,7 +120,7 @@ std::ostream& operator<<(std::ostream& os, const BasicBlock& block) {
   const BasicBlock* current_block = &block;
   while (current_block->PredecessorCount() > 0 && i++ < kMaxDisplayedBlocks) {
     current_block = current_block->predecessors().front();
-    os << " <= B" << current_block->id();
+    os << " <= id:" << current_block->id();
     info = current_block->debug_info();
     if (info.name) os << info;
   }
@@ -191,26 +194,26 @@ bool Schedule::SameBasicBlock(Node* a, Node* b) const {
 }
 
 BasicBlock* Schedule::NewBasicBlock() {
-  BasicBlock* block = new (zone_)
-      BasicBlock(zone_, BasicBlock::Id::FromSize(all_blocks_.size()));
+  BasicBlock* block = zone_->New<BasicBlock>(
+      zone_, BasicBlock::Id::FromSize(all_blocks_.size()));
   all_blocks_.push_back(block);
   return block;
 }
 
 void Schedule::PlanNode(BasicBlock* block, Node* node) {
-  if (FLAG_trace_turbo_scheduler) {
+  if (v8_flags.trace_turbo_scheduler) {
     StdoutStream{} << "Planning #" << node->id() << ":"
-                   << node->op()->mnemonic() << " for future add to B"
-                   << block->id() << "\n";
+                   << node->op()->mnemonic()
+                   << " for future add to id:" << block->id() << "\n";
   }
   DCHECK_NULL(this->block(node));
   SetBlockForNode(block, node);
 }
 
 void Schedule::AddNode(BasicBlock* block, Node* node) {
-  if (FLAG_trace_turbo_scheduler) {
+  if (v8_flags.trace_turbo_scheduler) {
     StdoutStream{} << "Adding #" << node->id() << ":" << node->op()->mnemonic()
-                   << " to B" << block->id() << "\n";
+                   << " to id:" << block->id() << "\n";
   }
   DCHECK(this->block(node) == nullptr || this->block(node) == block);
   block->AddNode(node);
@@ -218,7 +221,7 @@ void Schedule::AddNode(BasicBlock* block, Node* node) {
 }
 
 void Schedule::AddGoto(BasicBlock* block, BasicBlock* succ) {
-  DCHECK_EQ(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, block->control());
   block->set_control(BasicBlock::kGoto);
   AddSuccessor(block, succ);
 }
@@ -228,7 +231,7 @@ namespace {
 
 bool IsPotentiallyThrowingCall(IrOpcode::Value opcode) {
   switch (opcode) {
-#define BUILD_BLOCK_JS_CASE(Name) case IrOpcode::k##Name:
+#define BUILD_BLOCK_JS_CASE(Name, ...) case IrOpcode::k##Name:
     JS_OP_LIST(BUILD_BLOCK_JS_CASE)
 #undef BUILD_BLOCK_JS_CASE
     case IrOpcode::kCall:
@@ -243,7 +246,7 @@ bool IsPotentiallyThrowingCall(IrOpcode::Value opcode) {
 
 void Schedule::AddCall(BasicBlock* block, Node* call, BasicBlock* success_block,
                        BasicBlock* exception_block) {
-  DCHECK_EQ(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, block->control());
   DCHECK(IsPotentiallyThrowingCall(call->opcode()));
   block->set_control(BasicBlock::kCall);
   AddSuccessor(block, success_block);
@@ -253,7 +256,7 @@ void Schedule::AddCall(BasicBlock* block, Node* call, BasicBlock* success_block,
 
 void Schedule::AddBranch(BasicBlock* block, Node* branch, BasicBlock* tblock,
                          BasicBlock* fblock) {
-  DCHECK_EQ(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, block->control());
   DCHECK_EQ(IrOpcode::kBranch, branch->opcode());
   block->set_control(BasicBlock::kBranch);
   AddSuccessor(block, tblock);
@@ -263,7 +266,7 @@ void Schedule::AddBranch(BasicBlock* block, Node* branch, BasicBlock* tblock,
 
 void Schedule::AddSwitch(BasicBlock* block, Node* sw, BasicBlock** succ_blocks,
                          size_t succ_count) {
-  DCHECK_EQ(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, block->control());
   DCHECK_EQ(IrOpcode::kSwitch, sw->opcode());
   block->set_control(BasicBlock::kSwitch);
   for (size_t index = 0; index < succ_count; ++index) {
@@ -273,28 +276,28 @@ void Schedule::AddSwitch(BasicBlock* block, Node* sw, BasicBlock** succ_blocks,
 }
 
 void Schedule::AddTailCall(BasicBlock* block, Node* input) {
-  DCHECK_EQ(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, block->control());
   block->set_control(BasicBlock::kTailCall);
   SetControlInput(block, input);
   if (block != end()) AddSuccessor(block, end());
 }
 
 void Schedule::AddReturn(BasicBlock* block, Node* input) {
-  DCHECK_EQ(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, block->control());
   block->set_control(BasicBlock::kReturn);
   SetControlInput(block, input);
   if (block != end()) AddSuccessor(block, end());
 }
 
 void Schedule::AddDeoptimize(BasicBlock* block, Node* input) {
-  DCHECK_EQ(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, block->control());
   block->set_control(BasicBlock::kDeoptimize);
   SetControlInput(block, input);
   if (block != end()) AddSuccessor(block, end());
 }
 
 void Schedule::AddThrow(BasicBlock* block, Node* input) {
-  DCHECK_EQ(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, block->control());
   block->set_control(BasicBlock::kThrow);
   SetControlInput(block, input);
   if (block != end()) AddSuccessor(block, end());
@@ -302,8 +305,8 @@ void Schedule::AddThrow(BasicBlock* block, Node* input) {
 
 void Schedule::InsertBranch(BasicBlock* block, BasicBlock* end, Node* branch,
                             BasicBlock* tblock, BasicBlock* fblock) {
-  DCHECK_NE(BasicBlock::kNone, block->control());
-  DCHECK_EQ(BasicBlock::kNone, end->control());
+  CHECK_NE(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, end->control());
   end->set_control(block->control());
   block->set_control(BasicBlock::kBranch);
   MoveSuccessors(block, end);
@@ -317,8 +320,8 @@ void Schedule::InsertBranch(BasicBlock* block, BasicBlock* end, Node* branch,
 
 void Schedule::InsertSwitch(BasicBlock* block, BasicBlock* end, Node* sw,
                             BasicBlock** succ_blocks, size_t succ_count) {
-  DCHECK_NE(BasicBlock::kNone, block->control());
-  DCHECK_EQ(BasicBlock::kNone, end->control());
+  CHECK_NE(BasicBlock::kNone, block->control());
+  CHECK_EQ(BasicBlock::kNone, end->control());
   end->set_control(block->control());
   block->set_control(BasicBlock::kSwitch);
   MoveSuccessors(block, end);
@@ -332,12 +335,8 @@ void Schedule::InsertSwitch(BasicBlock* block, BasicBlock* end, Node* sw,
 }
 
 void Schedule::EnsureCFGWellFormedness() {
-  // Make a copy of all the blocks for the iteration, since adding the split
-  // edges will allocate new blocks.
-  BasicBlockVector all_blocks_copy(all_blocks_);
-
-  // Insert missing split edge blocks.
-  for (BasicBlock* block : all_blocks_copy) {
+  // Ensure there are no critical edges.
+  for (BasicBlock* block : all_blocks_) {
     if (block->PredecessorCount() > 1) {
       if (block != end_) {
         EnsureSplitEdgeForm(block);
@@ -464,22 +463,17 @@ std::ostream& operator<<(std::ostream& os, const Schedule& s) {
   for (BasicBlock* block :
        ((s.RpoBlockCount() == 0) ? *s.all_blocks() : *s.rpo_order())) {
     if (block == nullptr) continue;
-    if (block->rpo_number() == -1) {
-      os << "--- BLOCK id:" << block->id().ToInt();
-    } else {
-      os << "--- BLOCK B" << block->rpo_number();
-    }
+    os << "--- BLOCK B" << block->rpo_number() << " id" << block->id();
+#ifdef LOG_BUILTIN_BLOCK_COUNT
+    os << " PGO Execution Count:" << block->pgo_execution_count();
+#endif
     if (block->deferred()) os << " (deferred)";
     if (block->PredecessorCount() != 0) os << " <- ";
     bool comma = false;
     for (BasicBlock const* predecessor : block->predecessors()) {
       if (comma) os << ", ";
       comma = true;
-      if (predecessor->rpo_number() == -1) {
-        os << "id:" << predecessor->id().ToInt();
-      } else {
-        os << "B" << predecessor->rpo_number();
-      }
+      os << "B" << predecessor->rpo_number();
     }
     os << " ---\n";
     for (Node* node : *block) {
@@ -502,11 +496,7 @@ std::ostream& operator<<(std::ostream& os, const Schedule& s) {
       for (BasicBlock const* successor : block->successors()) {
         if (comma) os << ", ";
         comma = true;
-        if (successor->rpo_number() == -1) {
-          os << "id:" << successor->id().ToInt();
-        } else {
-          os << "B" << successor->rpo_number();
-        }
+        os << "B" << successor->rpo_number();
       }
       os << "\n";
     }

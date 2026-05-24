@@ -10,9 +10,9 @@ const buffer_dir = Buffer.from(string_dir);
 const encodings = ['ascii', 'utf8', 'utf16le', 'ucs2',
                    'base64', 'binary', 'hex'];
 const expected = {};
-encodings.forEach((encoding) => {
+for (const encoding of encodings) {
   expected[encoding] = buffer_dir.toString(encoding);
-});
+}
 
 
 // test sync version
@@ -54,45 +54,37 @@ for (encoding in expected) {
   fs.realpath(
     string_dir,
     { encoding },
-    common.mustCall((err, res) => {
-      assert.ifError(err);
+    common.mustSucceed((res) => {
       assert.strictEqual(res, expected_value);
     })
   );
-  fs.realpath(string_dir, encoding, common.mustCall((err, res) => {
-    assert.ifError(err);
+  fs.realpath(string_dir, encoding, common.mustSucceed((res) => {
     assert.strictEqual(res, expected_value);
   }));
   fs.realpath(
     buffer_dir,
     { encoding },
-    common.mustCall((err, res) => {
-      assert.ifError(err);
+    common.mustSucceed((res) => {
       assert.strictEqual(res, expected_value);
     })
   );
-  fs.realpath(buffer_dir, encoding, common.mustCall((err, res) => {
-    assert.ifError(err);
+  fs.realpath(buffer_dir, encoding, common.mustSucceed((res) => {
     assert.strictEqual(res, expected_value);
   }));
 }
 
-fs.realpath(string_dir, { encoding: 'buffer' }, common.mustCall((err, res) => {
-  assert.ifError(err);
+fs.realpath(string_dir, { encoding: 'buffer' }, common.mustSucceed((res) => {
   assert.deepStrictEqual(res, buffer_dir);
 }));
 
-fs.realpath(string_dir, 'buffer', common.mustCall((err, res) => {
-  assert.ifError(err);
+fs.realpath(string_dir, 'buffer', common.mustSucceed((res) => {
   assert.deepStrictEqual(res, buffer_dir);
 }));
 
-fs.realpath(buffer_dir, { encoding: 'buffer' }, common.mustCall((err, res) => {
-  assert.ifError(err);
+fs.realpath(buffer_dir, { encoding: 'buffer' }, common.mustSucceed((res) => {
   assert.deepStrictEqual(res, buffer_dir);
 }));
 
-fs.realpath(buffer_dir, 'buffer', common.mustCall((err, res) => {
-  assert.ifError(err);
+fs.realpath(buffer_dir, 'buffer', common.mustSucceed((res) => {
   assert.deepStrictEqual(res, buffer_dir);
 }));

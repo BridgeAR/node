@@ -18,12 +18,14 @@ namespace v8 {
 
 namespace tracing {
 class TracedValue;
-}
+}  // namespace tracing
 
 namespace internal {
 
 class JSFunction;
 class Script;
+template <typename T>
+class Tagged;
 
 struct ICInfo {
   ICInfo();
@@ -60,8 +62,8 @@ class ICStats {
     DCHECK(pos_ >= 0 && pos_ < MAX_IC_INFO);
     return ic_infos_[pos_];
   }
-  const char* GetOrCacheScriptName(Script script);
-  const char* GetOrCacheFunctionName(JSFunction function);
+  const char* GetOrCacheScriptName(Tagged<Script> script);
+  const char* GetOrCacheFunctionName(Tagged<JSFunction> function);
   V8_INLINE static ICStats* instance() { return instance_.Pointer(); }
 
  private:

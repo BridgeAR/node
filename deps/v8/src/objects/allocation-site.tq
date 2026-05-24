@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 extern class AllocationSite extends Struct;
+
 extern class AllocationMemento extends Struct {
   allocation_site: AllocationSite;
 }

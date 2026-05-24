@@ -36,7 +36,8 @@ static const int kNumLeafs = 4;
 class LoopFinderTester : HandleAndZoneScope {
  public:
   LoopFinderTester()
-      : isolate(main_isolate()),
+      : HandleAndZoneScope(kCompressGraphZone),
+        isolate(main_isolate()),
         common(main_zone()),
         graph(main_zone()),
         jsgraph(main_isolate(), &graph, &common, nullptr, nullptr, nullptr),
@@ -118,7 +119,6 @@ class LoopFinderTester : HandleAndZoneScope {
   }
 
   Node* Return(Node* val, Node* effect, Node* control) {
-    Node* zero = graph.NewNode(common.Int32Constant(0));
     Node* ret = graph.NewNode(common.Return(), zero, val, effect, control);
     end->ReplaceInput(0, ret);
     return ret;
@@ -126,7 +126,7 @@ class LoopFinderTester : HandleAndZoneScope {
 
   LoopTree* GetLoopTree() {
     if (loop_tree == nullptr) {
-      if (FLAG_trace_turbo_graph) {
+      if (v8_flags.trace_turbo_graph) {
         StdoutStream{} << AsRPO(graph);
       }
       Zone zone(main_isolate()->allocator(), ZONE_NAME);
@@ -927,7 +927,7 @@ TEST(LaEdgeMatrix3_5) { RunEdgeMatrix3_i(5); }
 
 static void RunManyChainedLoops_i(int count) {
   LoopFinderTester t;
-  Node** nodes = t.zone()->NewArray<Node*>(count * 4);
+  Node** nodes = t.zone()->AllocateArray<Node*>(count * 4);
   Node* k11 = t.jsgraph.Int32Constant(11);
   Node* k12 = t.jsgraph.Int32Constant(12);
   Node* last = t.start;
@@ -963,7 +963,7 @@ static void RunManyChainedLoops_i(int count) {
 
 static void RunManyNestedLoops_i(int count) {
   LoopFinderTester t;
-  Node** nodes = t.zone()->NewArray<Node*>(count * 5);
+  Node** nodes = t.zone()->AllocateArray<Node*>(count * 5);
   Node* k11 = t.jsgraph.Int32Constant(11);
   Node* k12 = t.jsgraph.Int32Constant(12);
   Node* outer = nullptr;

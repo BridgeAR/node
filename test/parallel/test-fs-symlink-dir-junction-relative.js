@@ -25,21 +25,19 @@
 const common = require('../common');
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs');
 
 const tmpdir = require('../common/tmpdir');
 
-const linkPath1 = path.join(tmpdir.path, 'junction1');
-const linkPath2 = path.join(tmpdir.path, 'junction2');
+const linkPath1 = tmpdir.resolve('junction1');
+const linkPath2 = tmpdir.resolve('junction2');
 const linkTarget = fixtures.fixturesDir;
 const linkData = fixtures.fixturesDir;
 
 tmpdir.refresh();
 
 // Test fs.symlink()
-fs.symlink(linkData, linkPath1, 'junction', common.mustCall(function(err) {
-  assert.ifError(err);
+fs.symlink(linkData, linkPath1, 'junction', common.mustSucceed(() => {
   verifyLink(linkPath1);
 }));
 

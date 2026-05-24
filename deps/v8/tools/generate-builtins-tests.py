@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2014 the V8 project authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 
-BLACKLIST = [
+SKIPLIST = [
   # Skip special d8 functions.
   "load", "os", "print", "read", "readline", "quit"
 ]
@@ -120,7 +120,7 @@ def GenerateTests(options):
 
   os.makedirs(options.outdir)
   for obj_name in objects:
-    if obj_name in BLACKLIST: continue
+    if obj_name in SKIPLIST: continue
     obj = objects[obj_name]
     VisitObject(obj, "", options)
 

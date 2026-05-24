@@ -5,94 +5,61 @@
 #ifndef V8_CODEGEN_COMPILATION_CACHE_H_
 #define V8_CODEGEN_COMPILATION_CACHE_H_
 
-#include "src/objects/compilation-cache.h"
+#include "src/base/hashmap.h"
+#include "src/objects/compilation-cache-table.h"
 #include "src/utils/allocation.h"
 
 namespace v8 {
 namespace internal {
 
-template <typename T>
-class Handle;
-
 class RootVisitor;
+struct ScriptDetails;
 
-// The compilation cache consists of several generational sub-caches which uses
-// this class as a base class. A sub-cache contains a compilation cache tables
-// for each generation of the sub-cache. Since the same source code string has
-// different compiled code for scripts and evals, we use separate sub-caches
-// for different compilation modes, to avoid retrieving the wrong result.
-class CompilationSubCache {
+// The compilation cache consists of several sub-caches: one each for evals and
+// scripts, which use this class as a base class, and a separate generational
+// sub-cache for RegExps. Since the same source code string has different
+// compiled code for scripts and evals, we use separate sub-caches for different
+// compilation modes, to avoid retrieving the wrong result.
+class CompilationCacheEvalOrScript {
  public:
-  CompilationSubCache(Isolate* isolate, int generations)
-      : isolate_(isolate), generations_(generations) {
-    tables_ = NewArray<Object>(generations);
-  }
+  explicit CompilationCacheEvalOrScript(Isolate* isolate) : isolate_(isolate) {}
 
-  ~CompilationSubCache() { DeleteArray(tables_); }
-
-  // Index for the first generation in the cache.
-  static const int kFirstGeneration = 0;
-
-  // Get the compilation cache tables for a specific generation.
-  Handle<CompilationCacheTable> GetTable(int generation);
-
-  // Accessors for first generation.
-  Handle<CompilationCacheTable> GetFirstTable() {
-    return GetTable(kFirstGeneration);
-  }
-  void SetFirstTable(Handle<CompilationCacheTable> value) {
-    DCHECK_LT(kFirstGeneration, generations_);
-    tables_[kFirstGeneration] = *value;
-  }
-
-  // Age the sub-cache by evicting the oldest generation and creating a new
-  // young generation.
-  void Age();
+  // Allocates the table if it didn't yet exist.
+  Handle<CompilationCacheTable> GetTable();
 
   // GC support.
   void Iterate(RootVisitor* v);
 
-  // Clear this sub-cache evicting all its content.
+  // Clears this sub-cache evicting all its content.
   void Clear();
 
-  // Remove given shared function info from sub-cache.
+  // Removes given shared function info from sub-cache.
   void Remove(Handle<SharedFunctionInfo> function_info);
 
-  // Number of generations in this sub-cache.
-  inline int generations() { return generations_; }
-
  protected:
-  Isolate* isolate() { return isolate_; }
+  Isolate* isolate() const { return isolate_; }
 
- private:
-  Isolate* isolate_;
-  int generations_;  // Number of generations.
-  Object* tables_;   // Compilation cache tables - one for each generation.
+  Isolate* const isolate_;
+  Object table_;
 
-  DISALLOW_IMPLICIT_CONSTRUCTORS(CompilationSubCache);
+  DISALLOW_IMPLICIT_CONSTRUCTORS(CompilationCacheEvalOrScript);
 };
 
 // Sub-cache for scripts.
-class CompilationCacheScript : public CompilationSubCache {
+class CompilationCacheScript : public CompilationCacheEvalOrScript {
  public:
-  explicit CompilationCacheScript(Isolate* isolate);
+  explicit CompilationCacheScript(Isolate* isolate)
+      : CompilationCacheEvalOrScript(isolate) {}
 
-  MaybeHandle<SharedFunctionInfo> Lookup(Handle<String> source,
-                                         MaybeHandle<Object> name,
-                                         int line_offset, int column_offset,
-                                         ScriptOriginOptions resource_options,
-                                         Handle<Context> native_context,
-                                         LanguageMode language_mode);
+  using LookupResult = CompilationCacheScriptLookupResult;
+  LookupResult Lookup(Handle<String> source,
+                      const ScriptDetails& script_details);
 
-  void Put(Handle<String> source, Handle<Context> context,
-           LanguageMode language_mode,
-           Handle<SharedFunctionInfo> function_info);
+  void Put(Handle<String> source, Handle<SharedFunctionInfo> function_info);
+
+  void Age();
 
  private:
-  bool HasOrigin(Handle<SharedFunctionInfo> function_info,
-                 MaybeHandle<Object> name, int line_offset, int column_offset,
-                 ScriptOriginOptions resource_options);
-
   DISALLOW_IMPLICIT_CONSTRUCTORS(CompilationCacheScript);
 };
 
@@ -108,10 +75,10 @@ class CompilationCacheScript : public CompilationSubCache {
 //    More specifically these are the CompileString, DebugEvaluate and
 //    DebugEvaluateGlobal runtime functions.
 // 4. The start position of the calling scope.
-class CompilationCacheEval : public CompilationSubCache {
+class CompilationCacheEval : public CompilationCacheEvalOrScript {
  public:
   explicit CompilationCacheEval(Isolate* isolate)
-      : CompilationSubCache(isolate, 1) {}
+      : CompilationCacheEvalOrScript(isolate) {}
 
   InfoCellPair Lookup(Handle<String> source,
                       Handle<SharedFunctionInfo> outer_info,
@@ -123,22 +90,45 @@ class CompilationCacheEval : public CompilationSubCache {
            Handle<Context> native_context, Handle<FeedbackCell> feedback_cell,
            int position);
 
+  void Age();
+
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(CompilationCacheEval);
 };
 
 // Sub-cache for regular expressions.
-class CompilationCacheRegExp : public CompilationSubCache {
+class CompilationCacheRegExp {
  public:
-  CompilationCacheRegExp(Isolate* isolate, int generations)
-      : CompilationSubCache(isolate, generations) {}
+  CompilationCacheRegExp(Isolate* isolate) : isolate_(isolate) {}
 
   MaybeHandle<FixedArray> Lookup(Handle<String> source, JSRegExp::Flags flags);
 
   void Put(Handle<String> source, JSRegExp::Flags flags,
            Handle<FixedArray> data);
 
+  // The number of generations for the RegExp sub cache.
+  static const int kGenerations = 2;
+
+  // Gets the compilation cache tables for a specific generation. Allocates the
+  // table if it does not yet exist.
+  Handle<CompilationCacheTable> GetTable(int generation);
+
+  // Ages the sub-cache by evicting the oldest generation and creating a new
+  // young generation.
+  void Age();
+
+  // GC support.
+  void Iterate(RootVisitor* v);
+
+  // Clears this sub-cache evicting all its content.
+  void Clear();
+
  private:
+  Isolate* isolate() const { return isolate_; }
+
+  Isolate* const isolate_;
+  Object tables_[kGenerations];  // One for each generation.
+
   DISALLOW_IMPLICIT_CONSTRUCTORS(CompilationCacheRegExp);
 };
 
@@ -148,13 +138,15 @@ class CompilationCacheRegExp : public CompilationSubCache {
 // compilation data is cached.
 class V8_EXPORT_PRIVATE CompilationCache {
  public:
-  // Finds the script shared function info for a source
-  // string. Returns an empty handle if the cache doesn't contain a
-  // script for the given source string with the right origin.
-  MaybeHandle<SharedFunctionInfo> LookupScript(
-      Handle<String> source, MaybeHandle<Object> name, int line_offset,
-      int column_offset, ScriptOriginOptions resource_options,
-      Handle<Context> native_context, LanguageMode language_mode);
+  CompilationCache(const CompilationCache&) = delete;
+  CompilationCache& operator=(const CompilationCache&) = delete;
+
+  // Finds the Script and root SharedFunctionInfo for a script source string.
+  // Returns empty handles if the cache doesn't contain a script for the given
+  // source string with the right origin.
+  CompilationCacheScript::LookupResult LookupScript(
+      Handle<String> source, const ScriptDetails& script_details,
+      LanguageMode language_mode);
 
   // Finds the shared function info for a source string for eval in a
   // given context.  Returns an empty handle if the cache doesn't
@@ -171,8 +163,7 @@ class V8_EXPORT_PRIVATE CompilationCache {
 
   // Associate the (source, kind) pair to the shared function
   // info. This may overwrite an existing mapping.
-  void PutScript(Handle<String> source, Handle<Context> native_context,
-                 LanguageMode language_mode,
+  void PutScript(Handle<String> source, LanguageMode language_mode,
                  Handle<SharedFunctionInfo> function_info);
 
   // Associate the (source, context->closure()->shared(), kind) triple
@@ -217,11 +208,13 @@ class V8_EXPORT_PRIVATE CompilationCache {
 
   base::HashMap* EagerOptimizingSet();
 
-  // The number of sub caches covering the different types to cache.
-  static const int kSubCacheCount = 4;
-
   bool IsEnabledScriptAndEval() const {
-    return FLAG_compilation_cache && enabled_script_and_eval_;
+    return v8_flags.compilation_cache && enabled_script_and_eval_;
+  }
+  bool IsEnabledScript(LanguageMode language_mode) {
+    // Tests can change v8_flags.use_strict at runtime. The compilation cache
+    // only contains scripts which were compiled with the default language mode.
+    return IsEnabledScriptAndEval() && language_mode == LanguageMode::kSloppy;
   }
 
   Isolate* isolate() const { return isolate_; }
@@ -232,14 +225,11 @@ class V8_EXPORT_PRIVATE CompilationCache {
   CompilationCacheEval eval_global_;
   CompilationCacheEval eval_contextual_;
   CompilationCacheRegExp reg_exp_;
-  CompilationSubCache* subcaches_[kSubCacheCount];
 
   // Current enable state of the compilation cache for scripts and eval.
   bool enabled_script_and_eval_;
 
   friend class Isolate;
-
-  DISALLOW_COPY_AND_ASSIGN(CompilationCache);
 };
 
 }  // namespace internal

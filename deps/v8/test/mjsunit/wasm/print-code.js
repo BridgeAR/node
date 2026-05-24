@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --print-wasm-code
+// Force TurboFan code for serialization.
+// Flags: --allow-natives-syntax --print-wasm-code --no-liftoff
+// Flags: --no-wasm-lazy-compilation
 
 // Just test that printing the code of the following wasm modules does not
 // crash.
 
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 (function print_deserialized_code() {
   // https://crbug.com/849656

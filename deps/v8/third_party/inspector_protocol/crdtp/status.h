@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef V8_CRDTP_STATUS_H_
 #define V8_CRDTP_STATUS_H_
 
+#include <cassert>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -45,7 +46,7 @@ enum class Error {
   CBOR_INVALID_STRING16 = 0x14,
   CBOR_INVALID_BINARY = 0x15,
   CBOR_UNSUPPORTED_VALUE = 0x16,
-  CBOR_NO_INPUT = 0x17,
+  CBOR_UNEXPECTED_EOF_IN_ENVELOPE = 0x17,
   CBOR_INVALID_START_BYTE = 0x18,
   CBOR_UNEXPECTED_EOF_EXPECTED_VALUE = 0x19,
   CBOR_UNEXPECTED_EOF_IN_ARRAY = 0x1a,
@@ -76,6 +77,8 @@ enum class Error {
   BINDINGS_STRING_VALUE_EXPECTED = 0x34,
   BINDINGS_STRING8_VALUE_EXPECTED = 0x35,
   BINDINGS_BINARY_VALUE_EXPECTED = 0x36,
+  BINDINGS_DICTIONARY_VALUE_EXPECTED = 0x37,
+  BINDINGS_INVALID_BASE64_STRING = 0x38,
 };
 
 // A status value with position that can be copied. The default status
@@ -103,6 +106,38 @@ struct Status {
   // includes the position.
   std::string ToASCIIString() const;
 };
+
+template <typename T>
+class StatusOr {
+ public:
+  explicit StatusOr(const T& value) : value_(value) {}
+  explicit StatusOr(T&& value) : value_(std::move(value)) {}
+  explicit StatusOr(const Status& status) : status_(status) {}
+
+  bool ok() const { return status_.ok(); }
+  const Status& status() const { return status_; }
+  T& operator*() & { return value(); }
+  const T& operator*() const& { return value(); }
+  T&& operator*() && { return value(); }
+
+  T& value() & {
+    assert(ok());
+    return value_;
+  }
+  T&& value() && {
+    assert(ok());
+    return std::move(value_);
+  }
+  const T& value() const& {
+    assert(ok());
+    return value_;
+  }
+
+ private:
+  Status status_;
+  T value_;
+};
+
 }  // namespace v8_crdtp
 
 #endif  // V8_CRDTP_STATUS_H_

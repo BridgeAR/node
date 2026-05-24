@@ -5,6 +5,7 @@
 #include <functional>
 
 #include "src/base/overflowing-math.h"
+#include "src/compiler/js-heap-broker.h"
 #include "src/compiler/js-operator.h"
 #include "src/compiler/node-properties.h"
 #include "src/compiler/operator-properties.h"
@@ -22,8 +23,8 @@ class TyperTest : public TypedGraphTest {
  public:
   TyperTest()
       : TypedGraphTest(3),
-        broker_(isolate(), zone(), FLAG_trace_heap_broker, false),
-        operation_typer_(&broker_, zone()),
+        current_broker_(broker()),
+        operation_typer_(broker(), zone()),
         types_(zone(), isolate(), random_number_generator()),
         javascript_(zone()),
         simplified_(zone()) {
@@ -56,12 +57,11 @@ class TyperTest : public TypedGraphTest {
 
   const int kRepetitions = 50;
 
-  JSHeapBroker broker_;
+  CurrentHeapBrokerScope current_broker_;
   OperationTyper operation_typer_;
   Types types_;
   JSOperatorBuilder javascript_;
   SimplifiedOperatorBuilder simplified_;
-  BinaryOperationHint const hints_ = BinaryOperationHint::kAny;
   Node* context_node_;
   v8::base::RandomNumberGenerator* rng_;
   std::vector<double> integers;
@@ -89,6 +89,11 @@ class TyperTest : public TypedGraphTest {
     return NodeProperties::GetType(n);
   }
 
+  Node* UndefinedConstant() {
+    Handle<HeapObject> value = isolate()->factory()->undefined_value();
+    return graph()->NewNode(common()->HeapConstant(value));
+  }
+
   Type TypeBinaryOp(const Operator* op, Type lhs, Type rhs) {
     Node* p0 = Parameter(0);
     Node* p1 = Parameter(1);
@@ -97,6 +102,9 @@ class TyperTest : public TypedGraphTest {
     std::vector<Node*> inputs;
     inputs.push_back(p0);
     inputs.push_back(p1);
+    if (JSOperator::IsBinaryWithFeedback(op->opcode())) {
+      inputs.push_back(UndefinedConstant());  // Feedback vector.
+    }
     if (OperatorProperties::HasContextInput(op)) {
       inputs.push_back(context_node_);
     }
@@ -176,7 +184,9 @@ class TyperTest : public TypedGraphTest {
             for (int x2 = rmin; x2 < rmin + width; x2++) {
               double result_value = opfun(x1, x2);
               Type result_type = Type::Constant(
-                  &broker_, isolate()->factory()->NewNumber(result_value),
+                  broker(),
+                  CanonicalHandle(
+                      isolate()->factory()->NewNumber(result_value)),
                   zone());
               EXPECT_TRUE(result_type.Is(expected_type));
             }
@@ -193,26 +203,29 @@ class TyperTest : public TypedGraphTest {
       Type r1 = RandomRange();
       Type r2 = RandomRange();
       Type expected_type = TypeBinaryOp(op, r1, r2);
-      for (int i = 0; i < 10; i++) {
+      for (int j = 0; j < 10; j++) {
         double x1 = RandomInt(r1.AsRange());
         double x2 = RandomInt(r2.AsRange());
         double result_value = opfun(x1, x2);
         Type result_type = Type::Constant(
-            &broker_, isolate()->factory()->NewNumber(result_value), zone());
+            broker(),
+            CanonicalHandle(isolate()->factory()->NewNumber(result_value)),
+            zone());
         EXPECT_TRUE(result_type.Is(expected_type));
       }
     }
     // Test extreme cases.
     double x1 = +1e-308;
     double x2 = -1e-308;
-    Type r1 =
-        Type::Constant(&broker_, isolate()->factory()->NewNumber(x1), zone());
-    Type r2 =
-        Type::Constant(&broker_, isolate()->factory()->NewNumber(x2), zone());
+    Type r1 = Type::Constant(
+        broker(), CanonicalHandle(isolate()->factory()->NewNumber(x1)), zone());
+    Type r2 = Type::Constant(
+        broker(), CanonicalHandle(isolate()->factory()->NewNumber(x2)), zone());
     Type expected_type = TypeBinaryOp(op, r1, r2);
     double result_value = opfun(x1, x2);
     Type result_type = Type::Constant(
-        &broker_, isolate()->factory()->NewNumber(result_value), zone());
+        broker(),
+        CanonicalHandle(isolate()->factory()->NewNumber(result_value)), zone());
     EXPECT_TRUE(result_type.Is(expected_type));
   }
 
@@ -222,15 +235,14 @@ class TyperTest : public TypedGraphTest {
       Type r1 = RandomRange();
       Type r2 = RandomRange();
       Type expected_type = TypeBinaryOp(op, r1, r2);
-      for (int i = 0; i < 10; i++) {
+      for (int j = 0; j < 10; j++) {
         double x1 = RandomInt(r1.AsRange());
         double x2 = RandomInt(r2.AsRange());
         bool result_value = opfun(x1, x2);
-        Type result_type =
-            Type::Constant(&broker_,
-                           result_value ? isolate()->factory()->true_value()
-                                        : isolate()->factory()->false_value(),
-                           zone());
+        Type result_type = Type::Constant(
+            broker(),
+            result_value ? broker()->true_value() : broker()->false_value(),
+            zone());
         EXPECT_TRUE(result_type.Is(expected_type));
       }
     }
@@ -242,12 +254,14 @@ class TyperTest : public TypedGraphTest {
       Type r1 = RandomRange(true);
       Type r2 = RandomRange(true);
       Type expected_type = TypeBinaryOp(op, r1, r2);
-      for (int i = 0; i < 10; i++) {
+      for (int j = 0; j < 10; j++) {
         int32_t x1 = static_cast<int32_t>(RandomInt(r1.AsRange()));
         int32_t x2 = static_cast<int32_t>(RandomInt(r2.AsRange()));
         double result_value = opfun(x1, x2);
         Type result_type = Type::Constant(
-            &broker_, isolate()->factory()->NewNumber(result_value), zone());
+            broker(),
+            CanonicalHandle(isolate()->factory()->NewNumber(result_value)),
+            zone());
         EXPECT_TRUE(result_type.Is(expected_type));
       }
     }
@@ -313,6 +327,18 @@ int32_t bit_xor(int32_t x, int32_t y) { return x ^ y; }
 double divide_double_double(double x, double y) { return base::Divide(x, y); }
 double modulo_double_double(double x, double y) { return Modulo(x, y); }
 
+FeedbackSource FeedbackSourceWithOneBinarySlot(TyperTest* R) {
+  return FeedbackSource{
+      FeedbackVector::NewWithOneBinarySlotForTesting(R->zone(), R->isolate()),
+      FeedbackSlot{0}};
+}
+
+FeedbackSource FeedbackSourceWithOneCompareSlot(TyperTest* R) {
+  return FeedbackSource{
+      FeedbackVector::NewWithOneCompareSlotForTesting(R->zone(), R->isolate()),
+      FeedbackSlot{0}};
+}
+
 }  // namespace
 
 
@@ -323,48 +349,59 @@ double modulo_double_double(double x, double y) { return Modulo(x, y); }
 //   to ranges as input types.
 
 TEST_F(TyperTest, TypeJSAdd) {
-  TestBinaryArithOp(javascript_.Add(hints_), std::plus<double>());
+  TestBinaryArithOp(javascript_.Add(FeedbackSourceWithOneBinarySlot(this)),
+                    std::plus<double>());
 }
 
 TEST_F(TyperTest, TypeJSSubtract) {
-  TestBinaryArithOp(javascript_.Subtract(), std::minus<double>());
+  TestBinaryArithOp(javascript_.Subtract(FeedbackSourceWithOneBinarySlot(this)),
+                    std::minus<double>());
 }
 
 TEST_F(TyperTest, TypeJSMultiply) {
-  TestBinaryArithOp(javascript_.Multiply(), std::multiplies<double>());
+  TestBinaryArithOp(javascript_.Multiply(FeedbackSourceWithOneBinarySlot(this)),
+                    std::multiplies<double>());
 }
 
 TEST_F(TyperTest, TypeJSDivide) {
-  TestBinaryArithOp(javascript_.Divide(), divide_double_double);
+  TestBinaryArithOp(javascript_.Divide(FeedbackSourceWithOneBinarySlot(this)),
+                    divide_double_double);
 }
 
 TEST_F(TyperTest, TypeJSModulus) {
-  TestBinaryArithOp(javascript_.Modulus(), modulo_double_double);
+  TestBinaryArithOp(javascript_.Modulus(FeedbackSourceWithOneBinarySlot(this)),
+                    modulo_double_double);
 }
 
 TEST_F(TyperTest, TypeJSBitwiseOr) {
-  TestBinaryBitOp(javascript_.BitwiseOr(), bit_or);
+  TestBinaryBitOp(javascript_.BitwiseOr(FeedbackSourceWithOneBinarySlot(this)),
+                  bit_or);
 }
 
 TEST_F(TyperTest, TypeJSBitwiseAnd) {
-  TestBinaryBitOp(javascript_.BitwiseAnd(), bit_and);
+  TestBinaryBitOp(javascript_.BitwiseAnd(FeedbackSourceWithOneBinarySlot(this)),
+                  bit_and);
 }
 
 TEST_F(TyperTest, TypeJSBitwiseXor) {
-  TestBinaryBitOp(javascript_.BitwiseXor(), bit_xor);
+  TestBinaryBitOp(javascript_.BitwiseXor(FeedbackSourceWithOneBinarySlot(this)),
+                  bit_xor);
 }
 
 TEST_F(TyperTest, TypeJSShiftLeft) {
-  TestBinaryBitOp(javascript_.ShiftLeft(), shift_left);
+  TestBinaryBitOp(javascript_.ShiftLeft(FeedbackSourceWithOneBinarySlot(this)),
+                  shift_left);
 }
 
 TEST_F(TyperTest, TypeJSShiftRight) {
-  TestBinaryBitOp(javascript_.ShiftRight(), shift_right);
+  TestBinaryBitOp(javascript_.ShiftRight(FeedbackSourceWithOneBinarySlot(this)),
+                  shift_right);
 }
 
 TEST_F(TyperTest, TypeJSLessThan) {
-  TestBinaryCompareOp(javascript_.LessThan(CompareOperationHint::kAny),
-                      std::less<double>());
+  TestBinaryCompareOp(
+      javascript_.LessThan(FeedbackSourceWithOneCompareSlot(this)),
+      std::less<double>());
 }
 
 TEST_F(TyperTest, TypeNumberLessThan) {
@@ -378,8 +415,9 @@ TEST_F(TyperTest, TypeSpeculativeNumberLessThan) {
 }
 
 TEST_F(TyperTest, TypeJSLessThanOrEqual) {
-  TestBinaryCompareOp(javascript_.LessThanOrEqual(CompareOperationHint::kAny),
-                      std::less_equal<double>());
+  TestBinaryCompareOp(
+      javascript_.LessThanOrEqual(FeedbackSourceWithOneCompareSlot(this)),
+      std::less_equal<double>());
 }
 
 TEST_F(TyperTest, TypeNumberLessThanOrEqual) {
@@ -394,19 +432,20 @@ TEST_F(TyperTest, TypeSpeculativeNumberLessThanOrEqual) {
 }
 
 TEST_F(TyperTest, TypeJSGreaterThan) {
-  TestBinaryCompareOp(javascript_.GreaterThan(CompareOperationHint::kAny),
-                      std::greater<double>());
+  TestBinaryCompareOp(
+      javascript_.GreaterThan(FeedbackSourceWithOneCompareSlot(this)),
+      std::greater<double>());
 }
 
 
 TEST_F(TyperTest, TypeJSGreaterThanOrEqual) {
   TestBinaryCompareOp(
-      javascript_.GreaterThanOrEqual(CompareOperationHint::kAny),
+      javascript_.GreaterThanOrEqual(FeedbackSourceWithOneCompareSlot(this)),
       std::greater_equal<double>());
 }
 
 TEST_F(TyperTest, TypeJSEqual) {
-  TestBinaryCompareOp(javascript_.Equal(CompareOperationHint::kAny),
+  TestBinaryCompareOp(javascript_.Equal(FeedbackSourceWithOneCompareSlot(this)),
                       std::equal_to<double>());
 }
 
@@ -422,8 +461,9 @@ TEST_F(TyperTest, TypeSpeculativeNumberEqual) {
 
 // For numbers there's no difference between strict and non-strict equality.
 TEST_F(TyperTest, TypeJSStrictEqual) {
-  TestBinaryCompareOp(javascript_.StrictEqual(CompareOperationHint::kAny),
-                      std::equal_to<double>());
+  TestBinaryCompareOp(
+      javascript_.StrictEqual(FeedbackSourceWithOneCompareSlot(this)),
+      std::equal_to<double>());
 }
 
 //------------------------------------------------------------------------------
@@ -441,10 +481,11 @@ TEST_MONOTONICITY(ToObject)
 TEST_MONOTONICITY(ToString)
 #undef TEST_MONOTONICITY
 
-// JS BINOPs with CompareOperationHint
-#define TEST_MONOTONICITY(name)                                           \
-  TEST_F(TyperTest, Monotonicity_##name) {                                \
-    TestBinaryMonotonicity(javascript_.name(CompareOperationHint::kAny)); \
+// JS compare ops.
+#define TEST_MONOTONICITY(name)                                    \
+  TEST_F(TyperTest, Monotonicity_##name) {                         \
+    TestBinaryMonotonicity(                                        \
+        javascript_.name(FeedbackSourceWithOneCompareSlot(this))); \
   }
 TEST_MONOTONICITY(Equal)
 TEST_MONOTONICITY(StrictEqual)
@@ -454,35 +495,32 @@ TEST_MONOTONICITY(LessThanOrEqual)
 TEST_MONOTONICITY(GreaterThanOrEqual)
 #undef TEST_MONOTONICITY
 
-// JS BINOPs with BinaryOperationHint
-#define TEST_MONOTONICITY(name)                                          \
-  TEST_F(TyperTest, Monotonicity_##name) {                               \
-    TestBinaryMonotonicity(javascript_.name(BinaryOperationHint::kAny)); \
+// JS binary ops.
+#define TEST_MONOTONICITY(name)                                   \
+  TEST_F(TyperTest, Monotonicity_##name) {                        \
+    TestBinaryMonotonicity(                                       \
+        javascript_.name(FeedbackSourceWithOneBinarySlot(this))); \
   }
 TEST_MONOTONICITY(Add)
+TEST_MONOTONICITY(BitwiseAnd)
+TEST_MONOTONICITY(BitwiseOr)
+TEST_MONOTONICITY(BitwiseXor)
+TEST_MONOTONICITY(Divide)
+TEST_MONOTONICITY(Modulus)
+TEST_MONOTONICITY(Multiply)
+TEST_MONOTONICITY(ShiftLeft)
+TEST_MONOTONICITY(ShiftRight)
+TEST_MONOTONICITY(ShiftRightLogical)
+TEST_MONOTONICITY(Subtract)
 #undef TEST_MONOTONICITY
 
 TEST_F(TyperTest, Monotonicity_InstanceOf) {
   TestBinaryMonotonicity(javascript_.InstanceOf(FeedbackSource()));
 }
 
-// JS BINOPS without hint
-#define TEST_MONOTONICITY(name)                 \
-  TEST_F(TyperTest, Monotonicity_##name) {      \
-    TestBinaryMonotonicity(javascript_.name()); \
-  }
-TEST_MONOTONICITY(BitwiseOr)
-TEST_MONOTONICITY(BitwiseXor)
-TEST_MONOTONICITY(BitwiseAnd)
-TEST_MONOTONICITY(ShiftLeft)
-TEST_MONOTONICITY(ShiftRight)
-TEST_MONOTONICITY(ShiftRightLogical)
-TEST_MONOTONICITY(Subtract)
-TEST_MONOTONICITY(Multiply)
-TEST_MONOTONICITY(Divide)
-TEST_MONOTONICITY(Modulus)
-TEST_MONOTONICITY(OrdinaryHasInstance)
-#undef TEST_MONOTONICITY
+TEST_F(TyperTest, Monotonicity_OrdinaryHasInstance) {
+  TestBinaryMonotonicity(javascript_.OrdinaryHasInstance());
+}
 
 // SIMPLIFIED UNOPs without hint
 #define TEST_MONOTONICITY(name)                \
@@ -600,32 +638,38 @@ TEST_F(TyperTest, Manual_Operation_NumberMax) {
   Type b = t(Type::MinusZero(), zero_or_minuszero);
   CHECK(Type::MinusZero().Is(b));
   CHECK(zero.Is(b));
-  CHECK(a.Is(b));
+  CHECK(a.Is(b));  // Monotonicity.
 
   Type c = t(zero_or_minuszero, Type::MinusZero());
   CHECK(Type::MinusZero().Is(c));
   CHECK(zero.Is(c));
-  CHECK(a.Is(c));
+  CHECK(a.Is(c));  // Monotonicity.
 
   Type d = t(zero_or_minuszero, zero_or_minuszero);
   CHECK(Type::MinusZero().Is(d));
   CHECK(zero.Is(d));
-  CHECK(b.Is(d));
-  CHECK(c.Is(d));
+  CHECK(b.Is(d));  // Monotonicity.
+  CHECK(c.Is(d));  // Monotonicity.
 
   Type e =
       t(Type::MinusZero(), Type::Union(Type::MinusZero(), dot_five, zone()));
   CHECK(Type::MinusZero().Is(e));
   CHECK(dot_five.Is(e));
-  CHECK(a.Is(e));
+  CHECK(a.Is(e));  // Monotonicity.
 
   Type f = t(Type::MinusZero(), zero);
   CHECK(zero.Is(f));
-  CHECK(f.Is(b));
+  CHECK(f.Is(b));  // Monotonicity.
 
   Type g = t(zero, Type::MinusZero());
   CHECK(zero.Is(g));
-  CHECK(g.Is(c));
+  CHECK(g.Is(c));  // Monotonicity.
+
+  Type h = t(Type::Signed32(), Type::MinusZero());
+  CHECK(Type::MinusZero().Is(h));
+
+  Type i = t(Type::Signed32(), zero_or_minuszero);
+  CHECK(h.Is(i));  // Monotonicity.
 }
 
 TEST_F(TyperTest, Manual_Operation_NumberMin) {
@@ -644,35 +688,41 @@ TEST_F(TyperTest, Manual_Operation_NumberMin) {
   Type b = t(Type::MinusZero(), zero_or_minuszero);
   CHECK(Type::MinusZero().Is(b));
   CHECK(zero.Is(b));
-  CHECK(a.Is(b));
+  CHECK(a.Is(b));  // Monotonicity.
 
   Type c = t(zero_or_minuszero, Type::MinusZero());
   CHECK(Type::MinusZero().Is(c));
   CHECK(zero.Is(c));
-  CHECK(a.Is(c));
+  CHECK(a.Is(c));  // Monotonicity.
 
   Type d = t(zero_or_minuszero, zero_or_minuszero);
   CHECK(Type::MinusZero().Is(d));
   CHECK(zero.Is(d));
-  CHECK(b.Is(d));
-  CHECK(c.Is(d));
+  CHECK(b.Is(d));  // Monotonicity.
+  CHECK(c.Is(d));  // Monotonicity.
 
   Type e = t(Type::MinusZero(),
              Type::Union(Type::MinusZero(), minus_dot_five, zone()));
   CHECK(Type::MinusZero().Is(e));
   CHECK(minus_dot_five.Is(e));
-  CHECK(a.Is(e));
+  CHECK(a.Is(e));  // Monotonicity.
 
   Type f = t(Type::MinusZero(), zero);
   CHECK(Type::MinusZero().Is(f));
-  CHECK(f.Is(b));
+  CHECK(f.Is(b));  // Monotonicity.
 
   Type g = t(zero, Type::MinusZero());
   CHECK(Type::MinusZero().Is(g));
-  CHECK(g.Is(c));
+  CHECK(g.Is(c));  // Monotonicity.
 
   Type h = t(one, Type::MinusZero());
   CHECK(Type::MinusZero().Is(h));
+
+  Type i = t(Type::Signed32(), Type::MinusZero());
+  CHECK(Type::MinusZero().Is(i));
+
+  Type j = t(Type::Signed32(), zero_or_minuszero);
+  CHECK(i.Is(j));  // Monotonicity.
 }
 
 }  // namespace compiler

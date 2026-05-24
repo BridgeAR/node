@@ -4,7 +4,6 @@
 
 require('../common');
 const assert = require('assert');
-const { URL, URLSearchParams } = require('url');
 const fixtures = require('../common/fixtures');
 
 const serialized = 'a=a&a=1&a=true&a=undefined&a=null&a=%EF%BF%BD' +
@@ -17,7 +16,9 @@ const normalizedValues = ['a', '1', 'true', 'undefined', 'null', '\uFFFD',
                           '[object Object]'];
 
 const m = new URL('http://example.org');
+const ownSymbolsBeforeGetterAccess = Object.getOwnPropertySymbols(m);
 const sp = m.searchParams;
+assert.deepStrictEqual(Object.getOwnPropertySymbols(m), ownSymbolsBeforeGetterAccess);
 
 assert(sp);
 assert.strictEqual(sp.toString(), '');
@@ -75,7 +76,7 @@ sp.forEach(function() {
 
 {
   const callbackErr = {
-    code: 'ERR_INVALID_CALLBACK',
+    code: 'ERR_INVALID_ARG_TYPE',
     name: 'TypeError'
   };
   assert.throws(() => sp.forEach(), callbackErr);

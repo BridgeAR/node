@@ -9,28 +9,29 @@ const arg = process.argv[2];
 switch (arg) {
   case 'test_init_callback':
     initHooks({
-      oninit: common.mustCall(() => { throw new Error(arg); })
+      oninit: common.mustCall(() => { throw new Error(arg); }),
     }).enable();
     new async_hooks.AsyncResource(`${arg}_type`);
     return;
 
-  case 'test_callback':
+  case 'test_callback': {
     initHooks({
-      onbefore: common.mustCall(() => { throw new Error(arg); })
+      onbefore: common.mustCall(() => { throw new Error(arg); }),
     }).enable();
     const resource = new async_hooks.AsyncResource(`${arg}_type`);
     resource.runInAsyncScope(() => {});
     return;
+  }
 
   case 'test_callback_abort':
     initHooks({
-      oninit: common.mustCall(() => { throw new Error(arg); })
+      oninit: common.mustCall(() => { throw new Error(arg); }),
     }).enable();
     new async_hooks.AsyncResource(`${arg}_type`);
     return;
 }
 
-// This part should run only for the master test
+// This part should run only for the primary test
 assert.ok(!arg);
 {
   // console.log should stay until this test's flakiness is solved
@@ -75,7 +76,7 @@ assert.ok(!arg);
     assert.strictEqual(child.status, null);
     // Most posix systems will show 'SIGABRT', but alpine34 does not
     if (child.signal !== 'SIGABRT') {
-      console.log(`parent received signal ${child.signal}\nchild's stderr:`);
+      console.log(`primary received signal ${child.signal}\nchild's stderr:`);
       console.log(child.stderr);
       process.exit(1);
     }

@@ -63,11 +63,12 @@ TEST(0) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F2>::FromCode(*code);
+  auto f = GeneratedCode<F2>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(3, 4, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(7, static_cast<int>(res));
@@ -87,7 +88,7 @@ TEST(1) {
 #endif
 
   __ lr(r3, r2);
-  __ lhi(r2, Operand(0, RelocInfo::NONE));
+  __ lhi(r2, Operand(0, RelocInfo::NO_INFO));
   __ b(&C);
 
   __ bind(&L);
@@ -95,17 +96,18 @@ TEST(1) {
   __ ahi(r3, Operand(-1 & 0xFFFF));
 
   __ bind(&C);
-  __ cfi(r3, Operand(0, RelocInfo::NONE));
+  __ cfi(r3, Operand(0, RelocInfo::NO_INFO));
   __ bne(&L);
   __ b(r14);
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(100, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(5050, static_cast<int>(res));
@@ -136,7 +138,7 @@ TEST(2) {
   __ ahi(r3, Operand(-1 & 0xFFFF));
 
   __ bind(&C);
-  __ cfi(r3, Operand(0, RelocInfo::NONE));
+  __ cfi(r3, Operand(0, RelocInfo::NO_INFO));
   __ bne(&L);
   __ b(r14);
 
@@ -151,11 +153,12 @@ TEST(2) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(10, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(3628800, static_cast<int>(res));
@@ -198,16 +201,17 @@ TEST(3) {
   __ mvc(MemOperand(r0, 123), MemOperand(r4, 567), Operand(88));
   __ sll(r13, Operand(10));
 
-  v8::internal::byte* bufPos = assm.buffer_pos();
+  uint8_t* bufPos = assm.buffer_pos();
   ::printf("buffer position = %p", static_cast<void*>(bufPos));
   ::fflush(stdout);
   // OS::DebugBreak();
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
   USE(code);
   ::exit(0);
@@ -246,11 +250,11 @@ TEST(4) {
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
   Handle<Code> code = isolate->factory()->NewCode(
-      desc, Code::STUB, Handle<Code>());
+      desc, CodeKind::FOR_TESTING, Handle<Code>());
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F2>::FromCode(*code);
+  auto f = GeneratedCode<F2>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(
       f.Call(3, 4, 3, 0, 0));
   ::printf("f() = %" V8PRIdPTR "\n", res);
@@ -274,11 +278,11 @@ TEST(5) {
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
   Handle<Code> code = isolate->factory()->NewCode(
-      desc, Code::STUB, Handle<Code>());
+      desc, CodeKind::FOR_TESTING, Handle<Code>());
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F2>::FromCode(*code);
+  auto f = GeneratedCode<F2>::FromCode(isolate, *code);
   intptr_t res =
     reinterpret_cast<intptr_t>(f.Call(3, 4, 3, 0, 0));
   ::printf("f() = %" V8PRIdPTR "\n", res);
@@ -308,11 +312,11 @@ TEST(6) {
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
   Handle<Code> code = isolate->factory()->NewCode(
-      desc, Code::STUB, Handle<Code>());
+      desc, CodeKind::FOR_TESTING, Handle<Code>());
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F2>::FromCode(*code);
+  auto f = GeneratedCode<F2>::FromCode(isolate, *code);
   intptr_t res =
     reinterpret_cast<intptr_t>(f.Call(3, 4, 3, 0, 0));
   ::printf("f() = %" V8PRIdPTR "\n", res);
@@ -340,11 +344,11 @@ TEST(7) {
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
   Handle<Code> code = isolate->factory()->NewCode(
-      desc, Code::STUB, Handle<Code>());
+      desc, CodeKind::FOR_TESTING, Handle<Code>());
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F2>::FromCode(*code);
+  auto f = GeneratedCode<F2>::FromCode(isolate, *code);
   intptr_t res =
     reinterpret_cast<intptr_t>(f.Call(3, 4, 3, 0, 0));
   ::printf("f() = %" V8PRIdPTR "\n", res);
@@ -371,11 +375,11 @@ TEST(8) {
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
   Handle<Code> code = isolate->factory()->NewCode(
-      desc, Code::STUB, Handle<Code>());
+      desc, CodeKind::FOR_TESTING, Handle<Code>());
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res =
     reinterpret_cast<intptr_t>(f.Call(100, 0,
                                                    0, 0, 0));
@@ -398,11 +402,11 @@ TEST(9) {
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
   Handle<Code> code = isolate->factory()->NewCode(
-      desc, Code::STUB, Handle<Code>());
+      desc, CodeKind::FOR_TESTING, Handle<Code>());
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res =
     reinterpret_cast<intptr_t>(f.Call(0, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIdPTR  "\n", res);
@@ -482,11 +486,12 @@ TEST(10) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F2>::FromCode(*code);
+  auto f = GeneratedCode<F2>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(3, 4, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(0, static_cast<int>(res));
@@ -535,11 +540,12 @@ TEST(11) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(0, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIdPTR  "\n", res);
   CHECK_EQ(0, static_cast<int>(res));
@@ -588,11 +594,12 @@ TEST(12) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(0, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIdPTR  "\n", res);
   CHECK_EQ(0, static_cast<int>(res));
@@ -651,11 +658,12 @@ TEST(13) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(50, 250, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(0, static_cast<int>(res));
@@ -741,11 +749,12 @@ TEST(14) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(0, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(0, static_cast<int>(res));
@@ -830,11 +839,12 @@ TEST(15) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(0, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(0, static_cast<int>(res));
@@ -876,11 +886,12 @@ TEST(16) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(0, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(0, static_cast<int>(res));
@@ -949,11 +960,12 @@ TEST(17) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(0x2, 0x30, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);
   CHECK_EQ(0, static_cast<int>(res));
@@ -1040,11 +1052,12 @@ TEST(18) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   // f.Call(reg2, reg3, reg4, reg5, reg6) -> set the register value
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(0, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIxPTR "\n", res);

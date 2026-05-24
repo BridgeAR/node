@@ -4,7 +4,7 @@
 
 // Flags: --experimental-wasm-compilation-hints
 
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 (function testCompileWithBadLazyHint() {
   print(arguments.callee.name);
@@ -19,7 +19,7 @@ load('test/mjsunit/wasm/wasm-module-builder.js');
   assertPromiseResult(WebAssembly.compile(bytes)
     .then(assertUnreachable,
           error => assertEquals("WebAssembly.compile(): Invalid compilation " +
-          "hint 0x2d (forbidden downgrade) @+49", error.message)));
+          "hint 0x19 (forbidden downgrade) @+49", error.message)));
 })();
 
 (function testCompileWithBadLazyFunctionBody() {
@@ -32,10 +32,12 @@ load('test/mjsunit/wasm/wasm-module-builder.js');
                              kCompilationHintTierDefault)
          .exportFunc();
   let bytes = builder.toBuffer();
-  assertPromiseResult(WebAssembly.compile(bytes)
-    .then(assertUnreachable,
-          error => assertEquals("WebAssembly.compile(): type error in " +
-          "merge[0] (expected i32, got i64) @+56", error.message)));
+  assertPromiseResult(WebAssembly.compile(bytes).then(
+      assertUnreachable,
+      error => assertEquals(
+          'WebAssembly.compile(): Compiling function #0:"id" failed: type ' +
+              'error in fallthru[0] (expected i32, got i64) @+56',
+          error.message)));
 })();
 
 (function testCompileEmptyModule() {

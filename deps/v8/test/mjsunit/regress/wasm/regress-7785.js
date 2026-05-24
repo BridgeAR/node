@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --experimental-wasm-anyref
+// Force TurboFan code for serialization.
+// Flags: --allow-natives-syntax --no-liftoff --no-wasm-lazy-compilation
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
-(function testAnyRefNull() {
+(function testExternRefNull() {
   const builder = new WasmModuleBuilder();
   builder.addFunction('main', kSig_r_v)
-      .addBody([kExprRefNull])
+      .addBody([kExprRefNull, kExternRefCode])
       .exportFunc();
 
   var wire_bytes = builder.toBuffer();
@@ -21,7 +22,7 @@ load("test/mjsunit/wasm/wasm-module-builder.js");
   assertEquals(null, instance.exports.main());
 })();
 
-(function testAnyRefIsNull() {
+(function testExternRefIsNull() {
   const builder = new WasmModuleBuilder();
   builder.addFunction('main', kSig_i_r)
       .addBody([kExprLocalGet, 0, kExprRefIsNull])

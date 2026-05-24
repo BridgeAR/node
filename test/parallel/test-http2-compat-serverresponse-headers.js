@@ -58,7 +58,7 @@ server.listen(0, common.mustCall(function() {
       ':method',
       ':path',
       ':authority',
-      ':scheme'
+      ':scheme',
     ].forEach((header) => assert.throws(
       () => response.setHeader(header, 'foobar'),
       {
@@ -102,7 +102,7 @@ server.listen(0, common.mustCall(function() {
     response.setHeader(real, expectedValue);
     const expectedHeaderNames = [real];
     assert.deepStrictEqual(response.getHeaderNames(), expectedHeaderNames);
-    const expectedHeaders = Object.create(null);
+    const expectedHeaders = { __proto__: null };
     expectedHeaders[real] = expectedValue;
     assert.deepStrictEqual(response.getHeaders(), expectedHeaders);
 
@@ -112,6 +112,11 @@ server.listen(0, common.mustCall(function() {
 
     assert.strictEqual(response.sendDate, true);
     response.sendDate = false;
+    assert.strictEqual(response.sendDate, false);
+
+    response.sendDate = true;
+    assert.strictEqual(response.sendDate, true);
+    response.removeHeader('Date');
     assert.strictEqual(response.sendDate, false);
 
     response.on('finish', common.mustCall(function() {

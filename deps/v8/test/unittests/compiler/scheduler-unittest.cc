@@ -30,19 +30,23 @@ namespace compiler {
 class SchedulerTest : public TestWithIsolateAndZone {
  public:
   SchedulerTest()
-      : graph_(zone()), common_(zone()), simplified_(zone()), js_(zone()) {}
+      : TestWithIsolateAndZone(kCompressGraphZone),
+        graph_(zone()),
+        common_(zone()),
+        simplified_(zone()),
+        js_(zone()) {}
 
   Schedule* ComputeAndVerifySchedule(size_t expected) {
-    if (FLAG_trace_turbo) {
+    if (v8_flags.trace_turbo) {
       SourcePositionTable table(graph());
       NodeOriginTable table2(graph());
       StdoutStream{} << AsJSON(*graph(), &table, &table2);
     }
 
     Schedule* schedule = Scheduler::ComputeSchedule(
-        zone(), graph(), Scheduler::kSplitNodes, tick_counter());
+        zone(), graph(), Scheduler::kSplitNodes, tick_counter(), nullptr);
 
-    if (FLAG_trace_turbo_scheduler) {
+    if (v8_flags.trace_turbo_scheduler) {
       StdoutStream{} << *schedule << std::endl;
     }
     ScheduleVerifier::Run(schedule);
@@ -92,7 +96,7 @@ TEST_F(SchedulerTest, BuildScheduleEmpty) {
   graph()->SetStart(graph()->NewNode(common()->Start(0)));
   graph()->SetEnd(graph()->NewNode(common()->End(1), graph()->start()));
   USE(Scheduler::ComputeSchedule(zone(), graph(), Scheduler::kNoFlags,
-                                 tick_counter()));
+                                 tick_counter(), nullptr));
 }
 
 
@@ -107,7 +111,7 @@ TEST_F(SchedulerTest, BuildScheduleOneParameter) {
   graph()->SetEnd(graph()->NewNode(common()->End(1), ret));
 
   USE(Scheduler::ComputeSchedule(zone(), graph(), Scheduler::kNoFlags,
-                                 tick_counter()));
+                                 tick_counter(), nullptr));
 }
 
 

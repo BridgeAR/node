@@ -17,6 +17,8 @@ namespace internal {
 class OrderedHashSet;
 class OrderedHashMap;
 
+#include "torque-generated/src/objects/js-collection-tq.inc"
+
 class JSCollection
     : public TorqueGeneratedJSCollection<JSCollection, JSObject> {
  public:
@@ -77,7 +79,7 @@ class JSMapIterator
 
   // Returns the current value of the iterator. This should only be called when
   // |HasMore| returns true.
-  inline Object CurrentValue();
+  inline Tagged<Object> CurrentValue();
 
   OBJECT_CONSTRUCTORS(JSMapIterator,
                       OrderedHashTableIterator<JSMapIterator, OrderedHashMap>);
@@ -116,7 +118,7 @@ class JSWeakMap : public TorqueGeneratedJSWeakMap<JSWeakMap, JSWeakCollection> {
   DECL_PRINTER(JSWeakMap)
   DECL_VERIFIER(JSWeakMap)
 
-  STATIC_ASSERT(kHeaderSize == kHeaderSizeOfAllWeakCollections);
+  static_assert(kHeaderSize == kHeaderSizeOfAllWeakCollections);
   TQ_OBJECT_CONSTRUCTORS(JSWeakMap)
 };
 
@@ -127,7 +129,7 @@ class JSWeakSet : public TorqueGeneratedJSWeakSet<JSWeakSet, JSWeakCollection> {
   DECL_PRINTER(JSWeakSet)
   DECL_VERIFIER(JSWeakSet)
 
-  STATIC_ASSERT(kHeaderSize == kHeaderSizeOfAllWeakCollections);
+  static_assert(kHeaderSize == kHeaderSizeOfAllWeakCollections);
   TQ_OBJECT_CONSTRUCTORS(JSWeakSet)
 };
 

@@ -26,6 +26,8 @@ const common = require('../common');
 const assert = require('assert');
 const domain = require('domain');
 
+process.on('warning', common.mustNotCall());
+
 const d = new domain.Domain();
 
 d.on('error', common.mustCall(function(er) {
@@ -35,7 +37,7 @@ d.on('error', common.mustCall(function(er) {
   assert.strictEqual(er.domainThrown, true);
   assert.ok(!er.domainEmitter);
   assert.strictEqual(er.actual.code, 'ENOENT');
-  assert.ok(/\bthis file does not exist\b/i.test(er.actual.path));
+  assert.match(er.actual.path, /\bthis file does not exist\b/i);
   assert.strictEqual(typeof er.actual.errno, 'number');
 }));
 

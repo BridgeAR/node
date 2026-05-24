@@ -7,6 +7,7 @@
 
 #include "src/common/globals.h"
 #include "src/handles/maybe-handles.h"
+#include "src/heap/heap.h"
 #include "src/objects/data-handler.h"
 #include "src/objects/elements-kind.h"
 #include "src/objects/field-index.h"
@@ -21,6 +22,22 @@ namespace internal {
 
 class JSProxy;
 
+enum class WasmValueType {
+  kI8,
+  kI16,
+  kI32,
+  kU32,  // Used only for loading WasmArray length.
+  kI64,
+  kF32,
+  kF64,
+  kS128,
+
+  kRef,
+  kRefNull,
+
+  kNumTypes
+};
+
 // A set of bit fields representing Smi handlers for loads and a HeapObject
 // that represents load handlers that can't be encoded in a Smi.
 // TODO(ishell): move to load-handler.h
@@ -31,14 +48,14 @@ class LoadHandler final : public DataHandler {
   DECL_PRINTER(LoadHandler)
   DECL_VERIFIER(LoadHandler)
 
-  enum Kind {
+  enum class Kind {
     kElement,
     kIndexedString,
     kNormal,
     kGlobal,
     kField,
     kConstantFromPrototype,
-    kAccessor,
+    kAccessorFromPrototype,
     kNativeDataProperty,
     kApiGetter,
     kApiGetterHolderIsPrototype,
@@ -50,59 +67,88 @@ class LoadHandler final : public DataHandler {
   };
   using KindBits = base::BitField<Kind, 0, 4>;
 
-  // Defines whether access rights check should be done on receiver object.
+  // Defines whether access rights check should be done on lookup start object.
   // Applicable to named property kinds only when loading value from prototype
-  // chain. Ignored when loading from holder.
-  using DoAccessCheckOnReceiverBits = KindBits::Next<bool, 1>;
+  // chain. Ignored when loading from lookup start object.
+  using DoAccessCheckOnLookupStartObjectBits = KindBits::Next<bool, 1>;
 
-  // Defines whether a lookup should be done on receiver object before
+  // Defines whether a lookup should be done on lookup start object before
   // proceeding to the prototype chain. Applicable to named property kinds only
-  // when loading value from prototype chain. Ignored when loading from holder.
-  using LookupOnReceiverBits = DoAccessCheckOnReceiverBits::Next<bool, 1>;
+  // when loading value from prototype chain. Ignored when loading from lookup
+  // start object.
+  using LookupOnLookupStartObjectBits =
+      DoAccessCheckOnLookupStartObjectBits::Next<bool, 1>;
 
   //
-  // Encoding when KindBits contains kForConstants.
+  // Encoding when KindBits contains kNativeDataProperty.
   //
 
   // Index of a value entry in the descriptor array.
   using DescriptorBits =
-      LookupOnReceiverBits::Next<unsigned, kDescriptorIndexBitCount>;
+      LookupOnLookupStartObjectBits::Next<unsigned, kDescriptorIndexBitCount>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(DescriptorBits::kLastUsedBit < kSmiValueSize);
+  static_assert(DescriptorBits::kLastUsedBit < kSmiValueSize);
 
   //
   // Encoding when KindBits contains kField.
   //
-  using IsInobjectBits = LookupOnReceiverBits::Next<bool, 1>;
+  using IsWasmStructBits = LookupOnLookupStartObjectBits::Next<bool, 1>;
+
+  //
+  // Encoding when KindBits contains kField and IsWasmStructBits is 0.
+  //
+  using IsInobjectBits = IsWasmStructBits::Next<bool, 1>;
   using IsDoubleBits = IsInobjectBits::Next<bool, 1>;
   // +1 here is to cover all possible JSObject header sizes.
   using FieldIndexBits =
       IsDoubleBits::Next<unsigned, kDescriptorIndexBitCount + 1>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(FieldIndexBits::kLastUsedBit < kSmiValueSize);
+  static_assert(FieldIndexBits::kLastUsedBit < kSmiValueSize);
+
+  //
+  // Encoding when KindBits contains kField and IsWasmStructBits is 1.
+  //
+  using WasmFieldTypeBits = IsWasmStructBits::Next<WasmValueType, 4>;
+  using WasmFieldOffsetBits = WasmFieldTypeBits::Next<unsigned, 20>;
+  // Make sure we don't overflow the smi.
+  static_assert(WasmFieldOffsetBits::kLastUsedBit < kSmiValueSize);
 
   //
   // Encoding when KindBits contains kElement or kIndexedString.
   //
-  using AllowOutOfBoundsBits = LookupOnReceiverBits::Next<bool, 1>;
+  using AllowOutOfBoundsBits = LookupOnLookupStartObjectBits::Next<bool, 1>;
 
   //
   // Encoding when KindBits contains kElement.
   //
-  using IsJsArrayBits = AllowOutOfBoundsBits::Next<bool, 1>;
+  using IsWasmArrayBits = AllowOutOfBoundsBits::Next<bool, 1>;
+
+  //
+  // Encoding when KindBits contains kElement and IsWasmArrayBits is 0.
+  //
+  using IsJsArrayBits = IsWasmArrayBits::Next<bool, 1>;
   using ConvertHoleBits = IsJsArrayBits::Next<bool, 1>;
   using ElementsKindBits = ConvertHoleBits::Next<ElementsKind, 8>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(ElementsKindBits::kLastUsedBit < kSmiValueSize);
+  static_assert(ElementsKindBits::kLastUsedBit < kSmiValueSize);
+
+  //
+  // Encoding when KindBits contains kElement and IsWasmArrayBits is 1.
+  //
+  using WasmArrayTypeBits = IsWasmArrayBits::Next<WasmValueType, 4>;
+  // Make sure we don't overflow the smi.
+  static_assert(WasmArrayTypeBits::kLastUsedBit < kSmiValueSize);
 
   //
   // Encoding when KindBits contains kModuleExport.
   //
-  using ExportsIndexBits = LookupOnReceiverBits::Next<
-      unsigned, kSmiValueSize - LookupOnReceiverBits::kLastUsedBit - 1>;
+  using ExportsIndexBits = LookupOnLookupStartObjectBits::Next<
+      unsigned,
+      kSmiValueSize - LookupOnLookupStartObjectBits::kLastUsedBit - 1>;
+  static_assert(ExportsIndexBits::kLastUsedBit < kSmiValueSize);
 
   // Decodes kind from Smi-handler.
-  static inline Kind GetHandlerKind(Smi smi_handler);
+  static inline Kind GetHandlerKind(Tagged<Smi> smi_handler);
 
   // Creates a Smi-handler for loading a property from a slow object.
   static inline Handle<Smi> LoadNormal(Isolate* isolate);
@@ -125,7 +171,7 @@ class LoadHandler final : public DataHandler {
   static inline Handle<Smi> LoadConstantFromPrototype(Isolate* isolate);
 
   // Creates a Smi-handler for calling a getter on a fast object.
-  static inline Handle<Smi> LoadAccessor(Isolate* isolate, int descriptor);
+  static inline Handle<Smi> LoadAccessorFromPrototype(Isolate* isolate);
 
   // Creates a Smi-handler for calling a getter on a proxy.
   static inline Handle<Smi> LoadProxy(Isolate* isolate);
@@ -143,6 +189,11 @@ class LoadHandler final : public DataHandler {
   // dictionary.
   static inline Handle<Smi> LoadModuleExport(Isolate* isolate, int index);
 
+  static inline Handle<Smi> LoadWasmStructField(Isolate* isolate,
+                                                WasmValueType type, int offset);
+  static inline Handle<Smi> LoadWasmArrayElement(Isolate* isolate,
+                                                 WasmValueType type);
+
   // Creates a data handler that represents a load of a non-existent property.
   // {holder} is the object from which the property is loaded. If no holder is
   // needed (e.g., for "nonexistent"), null_value() may be passed in.
@@ -153,10 +204,9 @@ class LoadHandler final : public DataHandler {
 
   // Creates a data handler that represents a prototype chain check followed
   // by given Smi-handler that encoded a load from the holder.
-  // Can be used only if GetPrototypeCheckCount() returns non negative value.
   static Handle<Object> LoadFromPrototype(
       Isolate* isolate, Handle<Map> receiver_map, Handle<JSReceiver> holder,
-      Handle<Smi> smi_handler,
+      Tagged<Smi> smi_handler,
       MaybeObjectHandle maybe_data1 = MaybeObjectHandle(),
       MaybeObjectHandle maybe_data2 = MaybeObjectHandle());
 
@@ -178,6 +228,14 @@ class LoadHandler final : public DataHandler {
   // Decodes the KeyedAccessLoadMode from a {handler}.
   static KeyedAccessLoadMode GetKeyedAccessLoadMode(MaybeObject handler);
 
+  // Returns true iff the handler can be used in the "holder != lookup start
+  // object" case.
+  static bool CanHandleHolderNotLookupStart(Tagged<Object> handler);
+
+#if defined(OBJECT_PRINT)
+  static void PrintHandler(Tagged<Object> handler, std::ostream& os);
+#endif  // defined(OBJECT_PRINT)
+
   OBJECT_CONSTRUCTORS(LoadHandler, DataHandler);
 };
 
@@ -191,12 +249,12 @@ class StoreHandler final : public DataHandler {
   DECL_PRINTER(StoreHandler)
   DECL_VERIFIER(StoreHandler)
 
-  enum Kind {
-    kElement,
+  enum class Kind {
     kField,
     kConstField,
     kAccessor,
     kNativeDataProperty,
+    kSharedStructField,
     kApiSetter,
     kApiSetterHolderIsPrototype,
     kGlobalProxy,
@@ -210,36 +268,29 @@ class StoreHandler final : public DataHandler {
 
   // Applicable to kGlobalProxy, kProxy kinds.
 
-  // Defines whether access rights check should be done on receiver object.
-  using DoAccessCheckOnReceiverBits = KindBits::Next<bool, 1>;
+  // Defines whether access rights check should be done on lookup start object.
+  using DoAccessCheckOnLookupStartObjectBits = KindBits::Next<bool, 1>;
 
-  // Defines whether a lookup should be done on receiver object before
+  // Defines whether a lookup should be done on lookup start object before
   // proceeding to the prototype chain. Applicable to named property kinds only
   // when storing through prototype chain. Ignored when storing to holder.
-  using LookupOnReceiverBits = DoAccessCheckOnReceiverBits::Next<bool, 1>;
+  using LookupOnLookupStartObjectBits =
+      DoAccessCheckOnLookupStartObjectBits::Next<bool, 1>;
 
-  // Applicable to kField, kTransitionToField and kTransitionToConstant
-  // kinds.
+  // Applicable to kField, kAccessor and kNativeDataProperty.
 
   // Index of a value entry in the descriptor array.
   using DescriptorBits =
-      LookupOnReceiverBits::Next<unsigned, kDescriptorIndexBitCount>;
+      LookupOnLookupStartObjectBits::Next<unsigned, kDescriptorIndexBitCount>;
 
   //
-  // Encodes the bits when StoreSlow contains KeyedAccessStoreMode.
+  // Encoding when KindBits contains kStoreSlow.
   //
   using KeyedAccessStoreModeBits =
-      DescriptorBits::Next<KeyedAccessStoreMode, 2>;
+      LookupOnLookupStartObjectBits::Next<KeyedAccessStoreMode, 2>;
 
   //
-  // Encoding when KindBits contains kTransitionToConstant.
-  //
-
-  // Make sure we don't overflow the smi.
-  STATIC_ASSERT(DescriptorBits::kLastUsedBit < kSmiValueSize);
-
-  //
-  // Encoding when KindBits contains kField or kTransitionToField.
+  // Encoding when KindBits contains kField.
   //
   using IsInobjectBits = DescriptorBits::Next<bool, 1>;
   using RepresentationBits = IsInobjectBits::Next<Representation::Kind, 3>;
@@ -247,7 +298,7 @@ class StoreHandler final : public DataHandler {
   using FieldIndexBits =
       RepresentationBits::Next<unsigned, kDescriptorIndexBitCount + 1>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(FieldIndexBits::kLastUsedBit < kSmiValueSize);
+  static_assert(FieldIndexBits::kLastUsedBit < kSmiValueSize);
 
   // Creates a Smi-handler for storing a field to fast object.
   static inline Handle<Smi> StoreField(Isolate* isolate, int descriptor,
@@ -255,6 +306,16 @@ class StoreHandler final : public DataHandler {
                                        PropertyConstness constness,
                                        Representation representation);
 
+  // Creates a Smi-handler for storing a field to a JSSharedStruct.
+  static inline Handle<Smi> StoreSharedStructField(
+      Isolate* isolate, int descriptor, FieldIndex field_index,
+      Representation representation);
+
+  // Create a store transition handler which doesn't check prototype chain.
+  static MaybeObjectHandle StoreOwnTransition(Isolate* isolate,
+                                              Handle<Map> transition_map);
+
+  // Create a store transition handler with prototype chain validity cell check.
   static MaybeObjectHandle StoreTransition(Isolate* isolate,
                                            Handle<Map> transition_map);
 
@@ -271,7 +332,7 @@ class StoreHandler final : public DataHandler {
 
   static Handle<Object> StoreThroughPrototype(
       Isolate* isolate, Handle<Map> receiver_map, Handle<JSReceiver> holder,
-      Handle<Smi> smi_handler,
+      Tagged<Smi> smi_handler,
       MaybeObjectHandle maybe_data1 = MaybeObjectHandle(),
       MaybeObjectHandle maybe_data2 = MaybeObjectHandle());
 
@@ -297,15 +358,27 @@ class StoreHandler final : public DataHandler {
   // Creates a Smi-handler for storing a property to an interceptor.
   static inline Handle<Smi> StoreInterceptor(Isolate* isolate);
 
+  static inline Handle<Code> StoreSloppyArgumentsBuiltin(
+      Isolate* isolate, KeyedAccessStoreMode mode);
+  static inline Handle<Code> StoreFastElementBuiltin(Isolate* isolate,
+                                                     KeyedAccessStoreMode mode);
+  static inline Handle<Code> ElementsTransitionAndStoreBuiltin(
+      Isolate* isolate, KeyedAccessStoreMode mode);
+
   // Creates a Smi-handler for storing a property.
   static inline Handle<Smi> StoreSlow(
       Isolate* isolate, KeyedAccessStoreMode store_mode = STANDARD_STORE);
 
   // Creates a Smi-handler for storing a property on a proxy.
   static inline Handle<Smi> StoreProxy(Isolate* isolate);
+  static inline Tagged<Smi> StoreProxy();
 
   // Decodes the KeyedAccessStoreMode from a {handler}.
   static KeyedAccessStoreMode GetKeyedAccessStoreMode(MaybeObject handler);
+
+#if defined(OBJECT_PRINT)
+  static void PrintHandler(Tagged<Object> handler, std::ostream& os);
+#endif  // defined(OBJECT_PRINT)
 
  private:
   static inline Handle<Smi> StoreField(Isolate* isolate, Kind kind,
@@ -314,6 +387,10 @@ class StoreHandler final : public DataHandler {
 
   OBJECT_CONSTRUCTORS(StoreHandler, DataHandler);
 };
+
+inline const char* WasmValueType2String(WasmValueType type);
+
+std::ostream& operator<<(std::ostream& os, WasmValueType type);
 
 }  // namespace internal
 }  // namespace v8

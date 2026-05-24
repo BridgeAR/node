@@ -24,15 +24,20 @@
 require('../common');
 const assert = require('assert');
 const fs = require('fs');
-const fixtures = require('../common/fixtures');
+const tmpdir = require('../common/tmpdir');
 
-const f = fixtures.path('x.txt');
+tmpdir.refresh();
+const f = tmpdir.resolve('x.txt');
+fs.closeSync(fs.openSync(f, 'w'));
 
 let changes = 0;
 function watchFile() {
   fs.watchFile(f, (curr, prev) => {
+    // Make sure there is at least one watch event that shows a changed mtime.
+    if (curr.mtime <= prev.mtime) {
+      return;
+    }
     changes++;
-    assert.notDeepStrictEqual(curr.mtime, prev.mtime);
     fs.unwatchFile(f);
     watchFile();
     fs.unwatchFile(f);
@@ -41,10 +46,17 @@ function watchFile() {
 
 watchFile();
 
+function changeFile() {
+  const fd = fs.openSync(f, 'w+');
+  fs.writeSync(fd, 'xyz\n');
+  fs.closeSync(fd);
+}
 
-const fd = fs.openSync(f, 'w+');
-fs.writeSync(fd, 'xyz\n');
-fs.closeSync(fd);
+changeFile();
+const interval = setInterval(changeFile, 1000);
+// Use unref() here so fs.watchFile() watcher is the only thing keeping the
+// event loop open.
+interval.unref();
 
 process.on('exit', function() {
   assert.ok(changes > 0);

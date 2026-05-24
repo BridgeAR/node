@@ -2,9 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-simd
-
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 // This test case tries to exercise SIMD stack to stack movements by creating
 // a function that has many parameters.
@@ -17,7 +15,7 @@ builder.addImportedMemory('m', 'imported_mem', 1, 2);
 builder.addType(makeSig(new Array(18).fill(kWasmS128), []));
 
 builder.addFunction(undefined, makeSig([], []))
-    .addLocals({s128_count: 9})
+    .addLocals(kWasmS128, 9)
     .addBodyWithEnd([
       // These will all be args to the callee.
       // Load first arg from memory, this was written with values from JS.

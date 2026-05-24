@@ -5,8 +5,6 @@
 #ifndef V8_TORQUE_TYPE_VISITOR_H_
 #define V8_TORQUE_TYPE_VISITOR_H_
 
-#include <string>
-
 #include "src/torque/ast.h"
 #include "src/torque/types.h"
 
@@ -32,7 +30,9 @@ class TypeVisitor {
   static void VisitStructMethods(StructType* struct_type,
                                  const StructDeclaration* struct_declaration);
   static Signature MakeSignature(const CallableDeclaration* declaration);
-  static const StructType* ComputeTypeForStructExpression(
+  // Can return either StructType or BitFieldStructType, since they can both be
+  // used in struct expressions like `MyStruct{ a: 0, b: foo }`
+  static const Type* ComputeTypeForStructExpression(
       TypeExpression* type_expression,
       const std::vector<const Type*>& term_argument_types);
 

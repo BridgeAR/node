@@ -47,8 +47,8 @@ class TestRangeBuilder {
   }
 
   TopLevelLiveRange* Build() {
-    TopLevelLiveRange* range =
-        new (zone_) TopLevelLiveRange(id_, MachineRepresentation::kTagged);
+    TopLevelLiveRange* range = zone_->New<TopLevelLiveRange>(
+        id_, MachineRepresentation::kTagged, zone_);
     // Traverse the provided interval specifications backwards, because that is
     // what LiveRange expects.
     for (int i = static_cast<int>(pairs_.size()) - 1; i >= 0; --i) {
@@ -56,13 +56,13 @@ class TestRangeBuilder {
       LifetimePosition start = LifetimePosition::FromInt(pair.first);
       LifetimePosition end = LifetimePosition::FromInt(pair.second);
       CHECK(start < end);
-      range->AddUseInterval(start, end, zone_, FLAG_trace_turbo_alloc);
+      range->AddUseInterval(start, end, zone_);
     }
     for (int pos : uses_) {
       UsePosition* use_position =
-          new (zone_) UsePosition(LifetimePosition::FromInt(pos), nullptr,
+          zone_->New<UsePosition>(LifetimePosition::FromInt(pos), nullptr,
                                   nullptr, UsePositionHintType::kNone);
-      range->AddUsePosition(use_position, FLAG_trace_turbo_alloc);
+      range->AddUsePosition(use_position, zone_);
     }
 
     pairs_.clear();
@@ -85,42 +85,34 @@ class LiveRangeUnitTest : public TestWithZone {
     return range->SplitAt(LifetimePosition::FromInt(pos), zone());
   }
 
-  TopLevelLiveRange* Splinter(TopLevelLiveRange* top, int start, int end,
-                              int new_id = 0) {
-    if (top->splinter() == nullptr) {
-      TopLevelLiveRange* ret = new (zone())
-          TopLevelLiveRange(new_id, MachineRepresentation::kTagged);
-      top->SetSplinter(ret);
-    }
-    top->Splinter(LifetimePosition::FromInt(start),
-                  LifetimePosition::FromInt(end), zone());
-    return top->splinter();
-  }
-
   // Ranges first and second match structurally.
-  bool RangesMatch(LiveRange* first, LiveRange* second) {
+  bool RangesMatch(const LiveRange* first, const LiveRange* second) {
     if (first->Start() != second->Start() || first->End() != second->End()) {
       return false;
     }
-    UseInterval* i1 = first->first_interval();
-    UseInterval* i2 = second->first_interval();
+    auto i1 = first->intervals().begin();
+    auto i2 = second->intervals().begin();
 
-    while (i1 != nullptr && i2 != nullptr) {
-      if (i1->start() != i2->start() || i1->end() != i2->end()) return false;
-      i1 = i1->next();
-      i2 = i2->next();
+    while (i1 != first->intervals().end() && i2 != second->intervals().end()) {
+      if (*i1 != *i2) return false;
+      ++i1;
+      ++i2;
     }
-    if (i1 != nullptr || i2 != nullptr) return false;
-
-    UsePosition* p1 = first->first_pos();
-    UsePosition* p2 = second->first_pos();
-
-    while (p1 != nullptr && p2 != nullptr) {
-      if (p1->pos() != p2->pos()) return false;
-      p1 = p1->next();
-      p2 = p2->next();
+    if (i1 != first->intervals().end() || i2 != second->intervals().end()) {
+      return false;
     }
-    if (p1 != nullptr || p2 != nullptr) return false;
+
+    UsePosition* const* p1 = first->positions().begin();
+    UsePosition* const* p2 = second->positions().begin();
+
+    while (p1 != first->positions().end() && p2 != second->positions().end()) {
+      if ((*p1)->pos() != (*p2)->pos()) return false;
+      ++p1;
+      ++p2;
+    }
+    if (p1 != first->positions().end() || p2 != second->positions().end()) {
+      return false;
+    }
     return true;
   }
 };
@@ -128,11 +120,11 @@ class LiveRangeUnitTest : public TestWithZone {
 TEST_F(LiveRangeUnitTest, InvalidConstruction) {
   // Build a range manually, because the builder guards against empty cases.
   TopLevelLiveRange* range =
-      new (zone()) TopLevelLiveRange(1, MachineRepresentation::kTagged);
-  V8_ASSERT_DEBUG_DEATH(range->AddUseInterval(LifetimePosition::FromInt(0),
-                                              LifetimePosition::FromInt(0),
-                                              zone(), FLAG_trace_turbo_alloc),
-                        ".*");
+      zone()->New<TopLevelLiveRange>(1, MachineRepresentation::kTagged, zone());
+  V8_ASSERT_DEBUG_DEATH(
+      range->AddUseInterval(LifetimePosition::FromInt(0),
+                            LifetimePosition::FromInt(0), zone()),
+      ".*");
 }
 
 TEST_F(LiveRangeUnitTest, SplitInvalidStart) {
@@ -308,183 +300,142 @@ TEST_F(LiveRangeUnitTest, SplitManyIntervalUsePositionsAfter) {
   EXPECT_TRUE(RangesMatch(expected_bottom, child));
 }
 
-TEST_F(LiveRangeUnitTest, SplinterSingleInterval) {
-  TopLevelLiveRange* range = TestRangeBuilder(zone()).Build(0, 6);
-  TopLevelLiveRange* splinter = Splinter(range, 3, 5);
-  EXPECT_EQ(nullptr, range->next());
-  EXPECT_EQ(nullptr, splinter->next());
-  EXPECT_EQ(range, splinter->splintered_from());
+class DoubleEndedSplitVectorTest : public TestWithZone {};
 
-  TopLevelLiveRange* expected_source =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 6).Build();
-  TopLevelLiveRange* expected_splinter = TestRangeBuilder(zone()).Build(3, 5);
-  EXPECT_TRUE(RangesMatch(expected_source, range));
-  EXPECT_TRUE(RangesMatch(expected_splinter, splinter));
+TEST_F(DoubleEndedSplitVectorTest, PushFront) {
+  DoubleEndedSplitVector<int> vec;
+
+  vec.push_front(zone(), 0);
+  vec.push_front(zone(), 1);
+  EXPECT_EQ(vec.front(), 1);
+  EXPECT_EQ(vec.back(), 0);
+
+  // Subsequent `push_front` should grow the backing allocation super-linearly.
+  vec.push_front(zone(), 2);
+  CHECK_EQ(vec.capacity(), 4);
+
+  // As long as there is remaining capacity, `push_front` should not copy or
+  // reallocate.
+  int* address_of_0 = &vec.back();
+  CHECK_EQ(*address_of_0, 0);
+  vec.push_front(zone(), 3);
+  EXPECT_EQ(address_of_0, &vec.back());
 }
 
-TEST_F(LiveRangeUnitTest, MergeSingleInterval) {
-  TopLevelLiveRange* original = TestRangeBuilder(zone()).Build(0, 6);
-  TopLevelLiveRange* splinter = Splinter(original, 3, 5);
+TEST_F(DoubleEndedSplitVectorTest, PopFront) {
+  DoubleEndedSplitVector<int> vec;
 
-  original->Merge(splinter, zone());
-  TopLevelLiveRange* result = TestRangeBuilder(zone()).Build(0, 6);
-  LiveRange* child_1 = Split(result, 3);
-  Split(child_1, 5);
-
-  EXPECT_TRUE(RangesMatch(result, original));
+  vec.push_front(zone(), 0);
+  vec.push_front(zone(), 1);
+  vec.pop_front();
+  EXPECT_EQ(vec.size(), 1u);
+  EXPECT_EQ(vec.front(), 0);
 }
 
-TEST_F(LiveRangeUnitTest, SplinterMultipleIntervalsOutside) {
-  TopLevelLiveRange* range =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  TopLevelLiveRange* splinter = Splinter(range, 2, 6);
-  EXPECT_EQ(nullptr, range->next());
-  EXPECT_EQ(nullptr, splinter->next());
-  EXPECT_EQ(range, splinter->splintered_from());
+TEST_F(DoubleEndedSplitVectorTest, Insert) {
+  DoubleEndedSplitVector<int> vec;
 
-  TopLevelLiveRange* expected_source =
-      TestRangeBuilder(zone()).Add(0, 2).Add(6, 8).Build();
-  TopLevelLiveRange* expected_splinter =
-      TestRangeBuilder(zone()).Add(2, 3).Add(5, 6).Build();
-  EXPECT_TRUE(RangesMatch(expected_source, range));
-  EXPECT_TRUE(RangesMatch(expected_splinter, splinter));
+  // Inserts with `direction = kFrontOrBack` should not reallocate when
+  // there is space at either the front or back.
+  vec.insert(zone(), vec.end(), 0);
+  vec.insert(zone(), vec.end(), 1);
+  vec.insert(zone(), vec.end(), 2);
+  CHECK_EQ(vec.capacity(), 4);
+
+  size_t memory_before = zone()->allocation_size();
+  vec.insert(zone(), vec.end(), 3);
+  size_t used_memory = zone()->allocation_size() - memory_before;
+  EXPECT_EQ(used_memory, 0u);
 }
 
-TEST_F(LiveRangeUnitTest, MergeMultipleIntervalsOutside) {
-  TopLevelLiveRange* original =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  TopLevelLiveRange* splinter = Splinter(original, 2, 6);
-  original->Merge(splinter, zone());
+TEST_F(DoubleEndedSplitVectorTest, InsertFront) {
+  DoubleEndedSplitVector<int> vec;
 
-  TopLevelLiveRange* result =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  LiveRange* child_1 = Split(result, 2);
-  Split(child_1, 6);
-  EXPECT_TRUE(RangesMatch(result, original));
+  // Inserts with `direction = kFront` should only copy elements to the left
+  // of the insert position, if there is space at the front.
+  vec.insert<kFront>(zone(), vec.begin(), 0);
+  vec.insert<kFront>(zone(), vec.begin(), 1);
+  vec.insert<kFront>(zone(), vec.begin(), 2);
+
+  int* address_of_0 = &vec.back();
+  CHECK_EQ(*address_of_0, 0);
+  vec.insert<kFront>(zone(), vec.begin(), 3);
+  EXPECT_EQ(address_of_0, &vec.back());
 }
 
-TEST_F(LiveRangeUnitTest, SplinterMultipleIntervalsInside) {
-  TopLevelLiveRange* range =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  V8_ASSERT_DEBUG_DEATH(Splinter(range, 3, 5), ".*");
+TEST_F(DoubleEndedSplitVectorTest, SplitAtBegin) {
+  DoubleEndedSplitVector<int> vec;
+
+  vec.insert(zone(), vec.end(), 0);
+  vec.insert(zone(), vec.end(), 1);
+  vec.insert(zone(), vec.end(), 2);
+
+  DoubleEndedSplitVector<int> all_split_begin = vec.SplitAt(vec.begin());
+  EXPECT_EQ(all_split_begin.size(), 3u);
+  EXPECT_EQ(vec.size(), 0u);
 }
 
-TEST_F(LiveRangeUnitTest, SplinterMultipleIntervalsLeft) {
-  TopLevelLiveRange* range =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  TopLevelLiveRange* splinter = Splinter(range, 2, 4);
-  EXPECT_EQ(nullptr, range->next());
-  EXPECT_EQ(nullptr, splinter->next());
-  EXPECT_EQ(range, splinter->splintered_from());
+TEST_F(DoubleEndedSplitVectorTest, SplitAtEnd) {
+  DoubleEndedSplitVector<int> vec;
 
-  TopLevelLiveRange* expected_source =
-      TestRangeBuilder(zone()).Add(0, 2).Add(5, 8).Build();
-  TopLevelLiveRange* expected_splinter = TestRangeBuilder(zone()).Build(2, 3);
-  EXPECT_TRUE(RangesMatch(expected_source, range));
-  EXPECT_TRUE(RangesMatch(expected_splinter, splinter));
+  vec.insert(zone(), vec.end(), 0);
+  vec.insert(zone(), vec.end(), 1);
+  vec.insert(zone(), vec.end(), 2);
+
+  DoubleEndedSplitVector<int> empty_split_end = vec.SplitAt(vec.end());
+  EXPECT_EQ(empty_split_end.size(), 0u);
+  EXPECT_EQ(vec.size(), 3u);
 }
 
-TEST_F(LiveRangeUnitTest, MergeMultipleIntervalsLeft) {
-  TopLevelLiveRange* original =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  TopLevelLiveRange* splinter = Splinter(original, 2, 4);
-  original->Merge(splinter, zone());
+TEST_F(DoubleEndedSplitVectorTest, SplitAtMiddle) {
+  DoubleEndedSplitVector<int> vec;
 
-  TopLevelLiveRange* result =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  Split(result, 2);
-  EXPECT_TRUE(RangesMatch(result, original));
+  vec.insert(zone(), vec.end(), 0);
+  vec.insert(zone(), vec.end(), 1);
+  vec.insert(zone(), vec.end(), 2);
+
+  DoubleEndedSplitVector<int> split_off = vec.SplitAt(vec.begin() + 1);
+  EXPECT_EQ(split_off.size(), 2u);
+  EXPECT_EQ(split_off[0], 1);
+  EXPECT_EQ(split_off[1], 2);
+  EXPECT_EQ(vec.size(), 1u);
+  EXPECT_EQ(vec[0], 0);
 }
 
-TEST_F(LiveRangeUnitTest, SplinterMultipleIntervalsRight) {
-  TopLevelLiveRange* range =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  TopLevelLiveRange* splinter = Splinter(range, 4, 6);
-  EXPECT_EQ(nullptr, range->next());
-  EXPECT_EQ(nullptr, splinter->next());
-  EXPECT_EQ(range, splinter->splintered_from());
+TEST_F(DoubleEndedSplitVectorTest, AppendCheap) {
+  DoubleEndedSplitVector<int> vec;
 
-  TopLevelLiveRange* expected_source =
-      TestRangeBuilder(zone()).Add(0, 3).Add(6, 8).Build();
-  TopLevelLiveRange* expected_splinter = TestRangeBuilder(zone()).Build(5, 6);
-  EXPECT_TRUE(RangesMatch(expected_source, range));
-  EXPECT_TRUE(RangesMatch(expected_splinter, splinter));
+  vec.insert(zone(), vec.end(), 0);
+  vec.insert(zone(), vec.end(), 1);
+  vec.insert(zone(), vec.end(), 2);
+
+  DoubleEndedSplitVector<int> split_off = vec.SplitAt(vec.begin() + 1);
+
+  // `Append`s of just split vectors should not allocate.
+  size_t memory_before = zone()->allocation_size();
+  vec.Append(zone(), split_off);
+  size_t used_memory = zone()->allocation_size() - memory_before;
+  EXPECT_EQ(used_memory, 0u);
+
+  EXPECT_EQ(vec[0], 0);
+  EXPECT_EQ(vec[1], 1);
+  EXPECT_EQ(vec[2], 2);
 }
 
-TEST_F(LiveRangeUnitTest, SplinterMergeMultipleTimes) {
-  TopLevelLiveRange* range =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 10).Add(12, 16).Build();
-  Splinter(range, 4, 6);
-  Splinter(range, 8, 14);
-  TopLevelLiveRange* splinter = range->splinter();
-  EXPECT_EQ(nullptr, range->next());
-  EXPECT_EQ(nullptr, splinter->next());
-  EXPECT_EQ(range, splinter->splintered_from());
+TEST_F(DoubleEndedSplitVectorTest, AppendGeneralCase) {
+  DoubleEndedSplitVector<int> vec;
+  vec.insert(zone(), vec.end(), 0);
+  vec.insert(zone(), vec.end(), 1);
 
-  TopLevelLiveRange* expected_source =
-      TestRangeBuilder(zone()).Add(0, 3).Add(6, 8).Add(14, 16).Build();
-  TopLevelLiveRange* expected_splinter =
-      TestRangeBuilder(zone()).Add(5, 6).Add(8, 10).Add(12, 14).Build();
-  EXPECT_TRUE(RangesMatch(expected_source, range));
-  EXPECT_TRUE(RangesMatch(expected_splinter, splinter));
-}
+  DoubleEndedSplitVector<int> other;
+  other.insert(zone(), other.end(), 2);
 
-TEST_F(LiveRangeUnitTest, MergeMultipleIntervalsRight) {
-  TopLevelLiveRange* original =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  TopLevelLiveRange* splinter = Splinter(original, 4, 6);
-  original->Merge(splinter, zone());
+  // May allocate.
+  vec.Append(zone(), other);
 
-  TopLevelLiveRange* result =
-      TestRangeBuilder(zone()).Add(0, 3).Add(5, 8).Build();
-  LiveRange* child_1 = Split(result, 5);
-  Split(child_1, 6);
-
-  EXPECT_TRUE(RangesMatch(result, original));
-}
-
-TEST_F(LiveRangeUnitTest, MergeAfterSplitting) {
-  TopLevelLiveRange* original = TestRangeBuilder(zone()).Build(0, 8);
-  TopLevelLiveRange* splinter = Splinter(original, 4, 6);
-  LiveRange* original_child = Split(original, 2);
-  Split(original_child, 7);
-  original->Merge(splinter, zone());
-
-  TopLevelLiveRange* result = TestRangeBuilder(zone()).Build(0, 8);
-  LiveRange* child_1 = Split(result, 2);
-  LiveRange* child_2 = Split(child_1, 4);
-  LiveRange* child_3 = Split(child_2, 6);
-  Split(child_3, 7);
-
-  EXPECT_TRUE(RangesMatch(result, original));
-}
-
-TEST_F(LiveRangeUnitTest, IDGeneration) {
-  TopLevelLiveRange* vreg = TestRangeBuilder(zone()).Id(2).Build(0, 100);
-  EXPECT_EQ(2, vreg->vreg());
-  EXPECT_EQ(0, vreg->relative_id());
-
-  TopLevelLiveRange* splinter =
-      new (zone()) TopLevelLiveRange(101, MachineRepresentation::kTagged);
-  vreg->SetSplinter(splinter);
-  vreg->Splinter(LifetimePosition::FromInt(4), LifetimePosition::FromInt(12),
-                 zone());
-
-  EXPECT_EQ(101, splinter->vreg());
-  EXPECT_EQ(1, splinter->relative_id());
-
-  LiveRange* child = vreg->SplitAt(LifetimePosition::FromInt(50), zone());
-
-  EXPECT_EQ(2, child->relative_id());
-
-  LiveRange* splinter_child =
-      splinter->SplitAt(LifetimePosition::FromInt(8), zone());
-
-  EXPECT_EQ(1, splinter->relative_id());
-  EXPECT_EQ(3, splinter_child->relative_id());
-
-  vreg->Merge(splinter, zone());
-  EXPECT_EQ(1, splinter->relative_id());
+  EXPECT_EQ(vec[0], 0);
+  EXPECT_EQ(vec[1], 1);
+  EXPECT_EQ(vec[2], 2);
 }
 
 }  // namespace compiler

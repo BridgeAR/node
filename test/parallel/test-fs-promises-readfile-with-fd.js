@@ -1,20 +1,17 @@
 'use strict';
 
-/*
- * This test makes sure that `readFile()` always reads from the current
- * position of the file, instead of reading from the beginning of the file.
- */
+// This test makes sure that `readFile()` always reads from the current
+// position of the file, instead of reading from the beginning of the file.
 
 const common = require('../common');
 const assert = require('assert');
-const path = require('path');
 const { writeFileSync } = require('fs');
 const { open } = require('fs').promises;
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
-const fn = path.join(tmpdir.path, 'test.txt');
+const fn = tmpdir.resolve('test.txt');
 writeFileSync(fn, 'Hello World');
 
 async function readFileTest() {
@@ -24,10 +21,10 @@ async function readFileTest() {
   const buf = Buffer.alloc(5);
   const { bytesRead } = await handle.read(buf, 0, 5, null);
   assert.strictEqual(bytesRead, 5);
-  assert.deepStrictEqual(buf.toString(), 'Hello');
+  assert.strictEqual(buf.toString(), 'Hello');
 
   /* readFile() should read from position five, instead of zero. */
-  assert.deepStrictEqual((await handle.readFile()).toString(), ' World');
+  assert.strictEqual((await handle.readFile()).toString(), ' World');
 
   await handle.close();
 }

@@ -15,7 +15,7 @@ process.report.directory = tmpdir.path;
 function validate() {
   const reports = helper.findReports(process.pid, tmpdir.path);
   assert.strictEqual(reports.length, 1);
-  helper.validate(reports[0]);
+  helper.validate(reports[0], arguments[0]);
   fs.unlinkSync(reports[0]);
   return reports[0];
 }
@@ -41,9 +41,16 @@ function validate() {
 }
 
 {
+  const error = new Error();
+  error.foo = 'goo';
+  process.report.writeReport(error);
+  validate([['javascriptStack.errorProperties.foo', 'goo']]);
+}
+
+{
   // Test with a file argument.
   const file = process.report.writeReport('custom-name-1.json');
-  const absolutePath = path.join(tmpdir.path, file);
+  const absolutePath = tmpdir.resolve(file);
   assert.strictEqual(helper.findReports(process.pid, tmpdir.path).length, 0);
   assert.strictEqual(file, 'custom-name-1.json');
   helper.validate(absolutePath);
@@ -54,7 +61,7 @@ function validate() {
   // Test with file and error arguments.
   const file = process.report.writeReport('custom-name-2.json',
                                           new Error('test error'));
-  const absolutePath = path.join(tmpdir.path, file);
+  const absolutePath = tmpdir.resolve(file);
   assert.strictEqual(helper.findReports(process.pid, tmpdir.path).length, 0);
   assert.strictEqual(file, 'custom-name-2.json');
   helper.validate(absolutePath);
@@ -110,7 +117,7 @@ function validate() {
 
 {
   // Test the case where the report file cannot be opened.
-  const reportDir = path.join(tmpdir.path, 'does', 'not', 'exist');
+  const reportDir = tmpdir.resolve('does', 'not', 'exist');
   const args = [`--report-directory=${reportDir}`,
                 '-e',
                 'process.report.writeReport()'];

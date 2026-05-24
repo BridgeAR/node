@@ -4,11 +4,15 @@
 
 #include "src/interpreter/bytecode-register-optimizer.h"
 
+#include "src/interpreter/bytecode-generator.h"
+
 namespace v8 {
 namespace internal {
 namespace interpreter {
 
 const uint32_t BytecodeRegisterOptimizer::kInvalidEquivalenceId = kMaxUInt32;
+
+using TypeHint = BytecodeRegisterOptimizer::TypeHint;
 
 // A class for tracking the state of a register. This class tracks
 // which equivalence set a register is a member of and also whether a
@@ -22,11 +26,16 @@ class BytecodeRegisterOptimizer::RegisterInfo final : public ZoneObject {
         materialized_(materialized),
         allocated_(allocated),
         needs_flush_(false),
+        type_hint_(TypeHint::kAny),
+        var_in_reg_(nullptr),
         next_(this),
         prev_(this) {}
+  RegisterInfo(const RegisterInfo&) = delete;
+  RegisterInfo& operator=(const RegisterInfo&) = delete;
 
   void AddToEquivalenceSetOf(RegisterInfo* info);
-  void MoveToNewEquivalenceSet(uint32_t equivalence_id, bool materialized);
+  void MoveToNewEquivalenceSet(uint32_t equivalence_id, bool materialized,
+                               Variable* var = nullptr);
   bool IsOnlyMemberOfEquivalenceSet() const;
   bool IsOnlyMaterializedMemberOfEquivalenceSet() const;
   bool IsInSameEquivalenceSet(RegisterInfo* info) const;
@@ -74,6 +83,11 @@ class BytecodeRegisterOptimizer::RegisterInfo final : public ZoneObject {
   // Indicates if a register should be processed when calling Flush().
   bool needs_flush() const { return needs_flush_; }
   void set_needs_flush(bool needs_flush) { needs_flush_ = needs_flush; }
+  TypeHint type_hint() const { return type_hint_; }
+  void set_type_hint(TypeHint hint) { type_hint_ = hint; }
+
+  Variable* var_in_reg() const { return var_in_reg_; }
+  void set_var_in_reg(Variable* var) { var_in_reg_ = var; }
 
  private:
   Register register_;
@@ -81,12 +95,12 @@ class BytecodeRegisterOptimizer::RegisterInfo final : public ZoneObject {
   bool materialized_;
   bool allocated_;
   bool needs_flush_;
+  TypeHint type_hint_;
+  Variable* var_in_reg_;
 
   // Equivalence set pointers.
   RegisterInfo* next_;
   RegisterInfo* prev_;
-
-  DISALLOW_COPY_AND_ASSIGN(RegisterInfo);
 };
 
 void BytecodeRegisterOptimizer::RegisterInfo::AddToEquivalenceSetOf(
@@ -102,20 +116,64 @@ void BytecodeRegisterOptimizer::RegisterInfo::AddToEquivalenceSetOf(
   next_->prev_ = this;
   set_equivalence_id(info->equivalence_id());
   set_materialized(false);
+  set_var_in_reg(info->var_in_reg());
+  type_hint_ = info->type_hint();
 }
 
 void BytecodeRegisterOptimizer::RegisterInfo::MoveToNewEquivalenceSet(
-    uint32_t equivalence_id, bool materialized) {
+    uint32_t equivalence_id, bool materialized, Variable* var) {
   next_->prev_ = prev_;
   prev_->next_ = next_;
   next_ = prev_ = this;
   equivalence_id_ = equivalence_id;
   materialized_ = materialized;
+  var_in_reg_ = var;
+  type_hint_ = TypeHint::kAny;
 }
 
 bool BytecodeRegisterOptimizer::RegisterInfo::IsOnlyMemberOfEquivalenceSet()
     const {
   return this->next_ == this;
+}
+
+void BytecodeRegisterOptimizer::SetVariableInRegister(Variable* var,
+                                                      Register reg) {
+  RegisterInfo* info = GetRegisterInfo(reg);
+  PushToRegistersNeedingFlush(info);
+  info->set_var_in_reg(var);
+}
+
+Variable* BytecodeRegisterOptimizer::GetVariableInRegister(Register reg) {
+  RegisterInfo* info = GetRegisterInfo(reg);
+  return info->var_in_reg();
+}
+
+bool BytecodeRegisterOptimizer::IsVariableInRegister(Variable* var,
+                                                     Register reg) {
+  DCHECK_NOT_NULL(var);
+  RegisterInfo* info = GetRegisterInfo(reg);
+  return info->var_in_reg() == var;
+}
+
+TypeHint BytecodeRegisterOptimizer::GetTypeHint(Register reg) {
+  RegisterInfo* info = GetRegisterInfo(reg);
+  return info->type_hint();
+}
+
+void BytecodeRegisterOptimizer::SetTypeHintForAccumulator(TypeHint hint) {
+  DCHECK(BytecodeGenerator::IsSameOrSubTypeHint(accumulator_info_->type_hint(),
+                                                hint));
+  if (accumulator_info_->type_hint() != hint) {
+    accumulator_info_->set_type_hint(hint);
+  }
+}
+
+void BytecodeRegisterOptimizer::ResetTypeHintForAccumulator() {
+  accumulator_info_->set_type_hint(TypeHint::kAny);
+}
+
+bool BytecodeRegisterOptimizer::IsAccumulatorReset() {
+  return accumulator_info_->type_hint() == TypeHint::kAny;
 }
 
 bool BytecodeRegisterOptimizer::RegisterInfo::
@@ -233,20 +291,16 @@ BytecodeRegisterOptimizer::BytecodeRegisterOptimizer(
   // a vector of register metadata.
   // There is at least one parameter, which is the JS receiver.
   DCHECK_NE(parameter_count, 0);
-#ifdef V8_REVERSE_JSARGS
   int first_slot_index = parameter_count - 1;
-#else
-  int first_slot_index = 0;
-#endif
   register_info_table_offset_ =
-      -Register::FromParameterIndex(first_slot_index, parameter_count).index();
+      -Register::FromParameterIndex(first_slot_index).index();
 
   // Initialize register map for parameters, locals, and the
   // accumulator.
   register_info_table_.resize(register_info_table_offset_ +
                               static_cast<size_t>(temporary_base_.index()));
   for (size_t i = 0; i < register_info_table_.size(); ++i) {
-    register_info_table_[i] = new (zone) RegisterInfo(
+    register_info_table_[i] = zone->New<RegisterInfo>(
         RegisterFromRegisterInfoTableIndex(i), NextEquivalenceId(), true, true);
     DCHECK_EQ(register_info_table_[i]->register_value().index(),
               RegisterFromRegisterInfoTableIndex(i).index());
@@ -256,6 +310,10 @@ BytecodeRegisterOptimizer::BytecodeRegisterOptimizer(
 }
 
 void BytecodeRegisterOptimizer::PushToRegistersNeedingFlush(RegisterInfo* reg) {
+  // Flushing is required in two cases:
+  // 1) Two or more registers in the same equivalence set.
+  // 2) Binding a variable to a register.
+  flush_required_ = true;
   if (!reg->needs_flush()) {
     reg->set_needs_flush(true);
     registers_needing_flushed_.push_back(reg);
@@ -284,6 +342,8 @@ void BytecodeRegisterOptimizer::Flush() {
   for (RegisterInfo* reg_info : registers_needing_flushed_) {
     if (!reg_info->needs_flush()) continue;
     reg_info->set_needs_flush(false);
+    reg_info->set_var_in_reg(nullptr);
+    reg_info->set_type_hint(TypeHint::kAny);
 
     RegisterInfo* materialized = reg_info->materialized()
                                      ? reg_info
@@ -376,9 +436,6 @@ void BytecodeRegisterOptimizer::AddToEquivalenceSet(
   // Equivalence class is now of size >= 2, so we make sure it will be flushed.
   PushToRegistersNeedingFlush(non_set_member);
   non_set_member->AddToEquivalenceSetOf(set_member);
-  // Flushing is only required when two or more registers are placed
-  // in the same equivalence set.
-  flush_required_ = true;
 }
 
 void BytecodeRegisterOptimizer::RegisterTransfer(RegisterInfo* input_info,
@@ -474,7 +531,7 @@ void BytecodeRegisterOptimizer::GrowRegisterMap(Register reg) {
     register_info_table_.resize(new_size);
     for (size_t i = old_size; i < new_size; ++i) {
       register_info_table_[i] =
-          new (zone()) RegisterInfo(RegisterFromRegisterInfoTableIndex(i),
+          zone()->New<RegisterInfo>(RegisterFromRegisterInfoTableIndex(i),
                                     NextEquivalenceId(), true, false);
     }
   }
@@ -507,6 +564,10 @@ void BytecodeRegisterOptimizer::RegisterListFreeEvent(RegisterList reg_list) {
   for (int i = 0; i < reg_list.register_count(); i++) {
     GetRegisterInfo(Register(first_index + i))->set_allocated(false);
   }
+}
+
+void BytecodeRegisterOptimizer::RegisterFreeEvent(Register reg) {
+  GetRegisterInfo(reg)->set_allocated(false);
 }
 
 }  // namespace interpreter

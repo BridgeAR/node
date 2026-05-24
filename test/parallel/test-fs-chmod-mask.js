@@ -4,7 +4,6 @@
 
 const common = require('../common');
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs');
 
 let mode;
@@ -26,17 +25,16 @@ function test(mode, asString) {
     (mode | maskToIgnore).toString(8) : (mode | maskToIgnore);
 
   {
-    const file = path.join(tmpdir.path, `chmod-async-${suffix}.txt`);
+    const file = tmpdir.resolve(`chmod-async-${suffix}.txt`);
     fs.writeFileSync(file, 'test', 'utf-8');
 
-    fs.chmod(file, input, common.mustCall((err) => {
-      assert.ifError(err);
+    fs.chmod(file, input, common.mustSucceed(() => {
       assert.strictEqual(fs.statSync(file).mode & 0o777, mode);
     }));
   }
 
   {
-    const file = path.join(tmpdir.path, `chmodSync-${suffix}.txt`);
+    const file = tmpdir.resolve(`chmodSync-${suffix}.txt`);
     fs.writeFileSync(file, 'test', 'utf-8');
 
     fs.chmodSync(file, input);
@@ -44,13 +42,10 @@ function test(mode, asString) {
   }
 
   {
-    const file = path.join(tmpdir.path, `fchmod-async-${suffix}.txt`);
+    const file = tmpdir.resolve(`fchmod-async-${suffix}.txt`);
     fs.writeFileSync(file, 'test', 'utf-8');
-    fs.open(file, 'w', common.mustCall((err, fd) => {
-      assert.ifError(err);
-
-      fs.fchmod(fd, input, common.mustCall((err) => {
-        assert.ifError(err);
+    fs.open(file, 'w', common.mustSucceed((fd) => {
+      fs.fchmod(fd, input, common.mustSucceed(() => {
         assert.strictEqual(fs.fstatSync(fd).mode & 0o777, mode);
         fs.close(fd, assert.ifError);
       }));
@@ -58,7 +53,7 @@ function test(mode, asString) {
   }
 
   {
-    const file = path.join(tmpdir.path, `fchmodSync-${suffix}.txt`);
+    const file = tmpdir.resolve(`fchmodSync-${suffix}.txt`);
     fs.writeFileSync(file, 'test', 'utf-8');
     const fd = fs.openSync(file, 'w');
 
@@ -69,20 +64,19 @@ function test(mode, asString) {
   }
 
   if (fs.lchmod) {
-    const link = path.join(tmpdir.path, `lchmod-src-${suffix}`);
-    const file = path.join(tmpdir.path, `lchmod-dest-${suffix}`);
+    const link = tmpdir.resolve(`lchmod-src-${suffix}`);
+    const file = tmpdir.resolve(`lchmod-dest-${suffix}`);
     fs.writeFileSync(file, 'test', 'utf-8');
     fs.symlinkSync(file, link);
 
-    fs.lchmod(link, input, common.mustCall((err) => {
-      assert.ifError(err);
+    fs.lchmod(link, input, common.mustSucceed(() => {
       assert.strictEqual(fs.lstatSync(link).mode & 0o777, mode);
     }));
   }
 
   if (fs.lchmodSync) {
-    const link = path.join(tmpdir.path, `lchmodSync-src-${suffix}`);
-    const file = path.join(tmpdir.path, `lchmodSync-dest-${suffix}`);
+    const link = tmpdir.resolve(`lchmodSync-src-${suffix}`);
+    const file = tmpdir.resolve(`lchmodSync-dest-${suffix}`);
     fs.writeFileSync(file, 'test', 'utf-8');
     fs.symlinkSync(file, link);
 

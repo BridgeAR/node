@@ -5,11 +5,8 @@
 #ifndef V8_OBJECTS_MAYBE_OBJECT_INL_H_
 #define V8_OBJECTS_MAYBE_OBJECT_INL_H_
 
+#include "src/common/ptr-compr-inl.h"
 #include "src/objects/maybe-object.h"
-
-#ifdef V8_COMPRESS_POINTERS
-#include "src/execution/isolate.h"
-#endif
 #include "src/objects/smi-inl.h"
 #include "src/objects/tagged-impl-inl.h"
 
@@ -21,13 +18,13 @@ namespace internal {
 //
 
 // static
-MaybeObject MaybeObject::FromSmi(Smi smi) {
+MaybeObject MaybeObject::FromSmi(Tagged<Smi> smi) {
   DCHECK(HAS_SMI_TAG(smi.ptr()));
   return MaybeObject(smi.ptr());
 }
 
 // static
-MaybeObject MaybeObject::FromObject(Object object) {
+MaybeObject MaybeObject::FromObject(Tagged<Object> object) {
   DCHECK(!HAS_WEAK_HEAP_OBJECT_TAG(object.ptr()));
   return MaybeObject(object.ptr());
 }
@@ -37,38 +34,60 @@ MaybeObject MaybeObject::MakeWeak(MaybeObject object) {
   return MaybeObject(object.ptr() | kWeakHeapObjectMask);
 }
 
+// static
+MaybeObject MaybeObject::Create(MaybeObject o) { return o; }
+
+// static
+MaybeObject MaybeObject::Create(Tagged<Object> o) { return FromObject(o); }
+
+// static
+MaybeObject MaybeObject::Create(Tagged<Smi> smi) { return FromSmi(smi); }
+
 //
 // HeapObjectReference implementation.
 //
 
-HeapObjectReference::HeapObjectReference(Object object)
+HeapObjectReference::HeapObjectReference(Tagged<Object> object)
     : MaybeObject(object.ptr()) {}
 
 // static
-HeapObjectReference HeapObjectReference::Strong(Object object) {
+HeapObjectReference HeapObjectReference::Strong(Tagged<Object> object) {
   DCHECK(!object.IsSmi());
   DCHECK(!HasWeakHeapObjectTag(object));
   return HeapObjectReference(object);
 }
 
 // static
-HeapObjectReference HeapObjectReference::Weak(Object object) {
+HeapObjectReference HeapObjectReference::Weak(Tagged<Object> object) {
   DCHECK(!object.IsSmi());
   DCHECK(!HasWeakHeapObjectTag(object));
   return HeapObjectReference(object.ptr() | kWeakHeapObjectMask);
 }
 
 // static
-HeapObjectReference HeapObjectReference::ClearedValue(Isolate* isolate) {
+HeapObjectReference HeapObjectReference::From(Tagged<Object> object,
+                                              HeapObjectReferenceType type) {
+  DCHECK(!object.IsSmi());
+  DCHECK(!HasWeakHeapObjectTag(object));
+  switch (type) {
+    case HeapObjectReferenceType::STRONG:
+      return HeapObjectReference::Strong(object);
+    case HeapObjectReferenceType::WEAK:
+      return HeapObjectReference::Weak(object);
+  }
+}
+
+// static
+HeapObjectReference HeapObjectReference::ClearedValue(
+    PtrComprCageBase cage_base) {
   // Construct cleared weak ref value.
-  Address raw_value = kClearedWeakHeapObjectLower32;
 #ifdef V8_COMPRESS_POINTERS
   // This is necessary to make pointer decompression computation also
   // suitable for cleared weak references.
-  Address isolate_root = isolate->isolate_root();
-  raw_value |= isolate_root;
-  DCHECK_EQ(raw_value & (~static_cast<Address>(kClearedWeakHeapObjectLower32)),
-            isolate_root);
+  Address raw_value = V8HeapCompressionScheme::DecompressTagged(
+      cage_base, kClearedWeakHeapObjectLower32);
+#else
+  Address raw_value = kClearedWeakHeapObjectLower32;
 #endif
   // The rest of the code will check only the lower 32-bits.
   DCHECK_EQ(kClearedWeakHeapObjectLower32, static_cast<uint32_t>(raw_value));
@@ -76,7 +95,8 @@ HeapObjectReference HeapObjectReference::ClearedValue(Isolate* isolate) {
 }
 
 template <typename THeapObjectSlot>
-void HeapObjectReference::Update(THeapObjectSlot slot, HeapObject value) {
+void HeapObjectReference::Update(THeapObjectSlot slot,
+                                 Tagged<HeapObject> value) {
   static_assert(std::is_same<THeapObjectSlot, FullHeapObjectSlot>::value ||
                     std::is_same<THeapObjectSlot, HeapObjectSlot>::value,
                 "Only FullHeapObjectSlot and HeapObjectSlot are expected here");

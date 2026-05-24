@@ -10,6 +10,8 @@
 namespace v8 {
 namespace internal {
 
+enum AllocationSiteOverrideMode;
+
 class ArrayBuiltinsAssembler : public CodeStubAssembler {
  public:
   explicit ArrayBuiltinsAssembler(compiler::CodeAssemblerState* state);
@@ -72,20 +74,20 @@ class ArrayBuiltinsAssembler : public CodeStubAssembler {
       TNode<JSFunction> target, TNode<HeapObject> allocation_site_or_undefined,
       TNode<Int32T> argc);
 
-  void GenerateDispatchToArrayStub(TNode<Context> context,
-                                   TNode<JSFunction> target, TNode<Int32T> argc,
-                                   AllocationSiteOverrideMode mode,
-                                   TNode<AllocationSite> allocation_site = {});
+  void GenerateDispatchToArrayStub(
+      TNode<Context> context, TNode<JSFunction> target, TNode<Int32T> argc,
+      AllocationSiteOverrideMode mode,
+      base::Optional<TNode<AllocationSite>> allocation_site = base::nullopt);
 
   void CreateArrayDispatchNoArgument(
       TNode<Context> context, TNode<JSFunction> target, TNode<Int32T> argc,
       AllocationSiteOverrideMode mode,
-      TNode<AllocationSite> allocation_site = {});
+      base::Optional<TNode<AllocationSite>> allocation_site);
 
   void CreateArrayDispatchSingleArgument(
       TNode<Context> context, TNode<JSFunction> target, TNode<Int32T> argc,
       AllocationSiteOverrideMode mode,
-      TNode<AllocationSite> allocation_site = {});
+      base::Optional<TNode<AllocationSite>> allocation_site);
 
   void GenerateConstructor(TNode<Context> context,
                            TNode<HeapObject> array_function,
@@ -104,7 +106,7 @@ class ArrayBuiltinsAssembler : public CodeStubAssembler {
  private:
   void VisitAllTypedArrayElements(TNode<JSArrayBuffer> array_buffer,
                                   const CallResultProcessor& processor,
-                                  Label* detached, ForEachDirection direction,
+                                  ForEachDirection direction,
                                   TNode<JSTypedArray> typed_array);
 
   TNode<Object> callbackfn_;

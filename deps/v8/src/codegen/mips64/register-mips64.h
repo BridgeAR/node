@@ -6,8 +6,7 @@
 #define V8_CODEGEN_MIPS64_REGISTER_MIPS64_H_
 
 #include "src/codegen/mips64/constants-mips64.h"
-#include "src/codegen/register.h"
-#include "src/codegen/reglist.h"
+#include "src/codegen/register-base.h"
 
 namespace v8 {
 namespace internal {
@@ -21,7 +20,7 @@ namespace internal {
 
 #define ALLOCATABLE_GENERAL_REGISTERS(V) \
   V(a0)  V(a1)  V(a2)  V(a3) \
-  V(a4)  V(a5)  V(a6)  V(a7)  V(t0)  V(t1)  V(t2) V(s7) \
+  V(a4)  V(a5)  V(a6)  V(a7)  V(t0)  V(t1)  V(t2)  V(t3)  V(s7) \
   V(v0)  V(v1)
 
 #define DOUBLE_REGISTERS(V)                               \
@@ -29,6 +28,13 @@ namespace internal {
   V(f8)  V(f9)  V(f10) V(f11) V(f12) V(f13) V(f14) V(f15) \
   V(f16) V(f17) V(f18) V(f19) V(f20) V(f21) V(f22) V(f23) \
   V(f24) V(f25) V(f26) V(f27) V(f28) V(f29) V(f30) V(f31)
+
+// Currently, MIPS64 just use even float point register, except
+// for C function param registers.
+#define DOUBLE_USE_REGISTERS(V)                           \
+  V(f0)  V(f2)  V(f4)  V(f6)  V(f8)  V(f10) V(f12) V(f13) \
+  V(f14) V(f15) V(f16) V(f17) V(f18) V(f19) V(f20) V(f22) \
+  V(f24) V(f26) V(f28) V(f30)
 
 #define FLOAT_REGISTERS DOUBLE_REGISTERS
 #define SIMD128_REGISTERS(V)                              \
@@ -45,101 +51,6 @@ namespace internal {
 // Note that the bit values must match those used in actual instruction
 // encoding.
 const int kNumRegs = 32;
-
-const RegList kJSCallerSaved = 1 << 2 |   // v0
-                               1 << 3 |   // v1
-                               1 << 4 |   // a0
-                               1 << 5 |   // a1
-                               1 << 6 |   // a2
-                               1 << 7 |   // a3
-                               1 << 8 |   // a4
-                               1 << 9 |   // a5
-                               1 << 10 |  // a6
-                               1 << 11 |  // a7
-                               1 << 12 |  // t0
-                               1 << 13 |  // t1
-                               1 << 14 |  // t2
-                               1 << 15;   // t3
-
-const int kNumJSCallerSaved = 14;
-
-// Callee-saved registers preserved when switching from C to JavaScript.
-const RegList kCalleeSaved = 1 << 16 |  // s0
-                             1 << 17 |  // s1
-                             1 << 18 |  // s2
-                             1 << 19 |  // s3
-                             1 << 20 |  // s4
-                             1 << 21 |  // s5
-                             1 << 22 |  // s6 (roots in Javascript code)
-                             1 << 23 |  // s7 (cp in Javascript code)
-                             1 << 30;   // fp/s8
-
-const int kNumCalleeSaved = 9;
-
-const RegList kCalleeSavedFPU = 1 << 20 |  // f20
-                                1 << 22 |  // f22
-                                1 << 24 |  // f24
-                                1 << 26 |  // f26
-                                1 << 28 |  // f28
-                                1 << 30;   // f30
-
-const int kNumCalleeSavedFPU = 6;
-
-const RegList kCallerSavedFPU = 1 << 0 |   // f0
-                                1 << 2 |   // f2
-                                1 << 4 |   // f4
-                                1 << 6 |   // f6
-                                1 << 8 |   // f8
-                                1 << 10 |  // f10
-                                1 << 12 |  // f12
-                                1 << 14 |  // f14
-                                1 << 16 |  // f16
-                                1 << 18;   // f18
-
-// Number of registers for which space is reserved in safepoints. Must be a
-// multiple of 8.
-const int kNumSafepointRegisters = 24;
-
-// Define the list of registers actually saved at safepoints.
-// Note that the number of saved registers may be smaller than the reserved
-// space, i.e. kNumSafepointSavedRegisters <= kNumSafepointRegisters.
-const RegList kSafepointSavedRegisters = kJSCallerSaved | kCalleeSaved;
-const int kNumSafepointSavedRegisters = kNumJSCallerSaved + kNumCalleeSaved;
-
-const int kUndefIndex = -1;
-// Map with indexes on stack that corresponds to codes of saved registers.
-const int kSafepointRegisterStackIndexMap[kNumRegs] = {kUndefIndex,  // zero_reg
-                                                       kUndefIndex,  // at
-                                                       0,            // v0
-                                                       1,            // v1
-                                                       2,            // a0
-                                                       3,            // a1
-                                                       4,            // a2
-                                                       5,            // a3
-                                                       6,            // a4
-                                                       7,            // a5
-                                                       8,            // a6
-                                                       9,            // a7
-                                                       10,           // t0
-                                                       11,           // t1
-                                                       12,           // t2
-                                                       13,           // t3
-                                                       14,           // s0
-                                                       15,           // s1
-                                                       16,           // s2
-                                                       17,           // s3
-                                                       18,           // s4
-                                                       19,           // s5
-                                                       20,           // s6
-                                                       21,           // s7
-                                                       kUndefIndex,  // t8
-                                                       kUndefIndex,  // t9
-                                                       kUndefIndex,  // k0
-                                                       kUndefIndex,  // k1
-                                                       kUndefIndex,  // gp
-                                                       kUndefIndex,  // sp
-                                                       22,           // fp
-                                                       kUndefIndex};
 
 // CPU Registers.
 //
@@ -203,9 +114,34 @@ int ToNumber(Register reg);
 
 Register ToRegister(int num);
 
-constexpr bool kPadArguments = false;
-constexpr bool kSimpleFPAliasing = true;
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+inline Register ReassignRegister(Register& source) {
+  Register result = source;
+  source = Register::no_reg();
+  return result;
+}
+
+// Returns the number of padding slots needed for stack pointer alignment.
+constexpr int ArgumentPaddingSlots(int argument_count) {
+  // No argument padding required.
+  return 0;
+}
+
+constexpr AliasingKind kFPAliasing = AliasingKind::kOverlap;
 constexpr bool kSimdMaskRegisters = false;
+
+enum MSARegisterCode {
+#define REGISTER_CODE(R) kMsaCode_##R,
+  SIMD128_REGISTERS(REGISTER_CODE)
+#undef REGISTER_CODE
+      kMsaAfterLast
+};
+
+// MIPS SIMD (MSA) register
+class MSARegister : public RegisterBase<MSARegister, kMsaAfterLast> {
+  friend class RegisterBase;
+  explicit constexpr MSARegister(int code) : RegisterBase(code) {}
+};
 
 enum DoubleRegisterCode {
 #define REGISTER_CODE(R) kDoubleCode_##R,
@@ -234,22 +170,11 @@ class FPURegister : public RegisterBase<FPURegister, kDoubleAfterLast> {
     return FPURegister::from_code(code() + 1);
   }
 
+  MSARegister toW() const { return MSARegister::from_code(code()); }
+
  private:
   friend class RegisterBase;
   explicit constexpr FPURegister(int code) : RegisterBase(code) {}
-};
-
-enum MSARegisterCode {
-#define REGISTER_CODE(R) kMsaCode_##R,
-  SIMD128_REGISTERS(REGISTER_CODE)
-#undef REGISTER_CODE
-      kMsaAfterLast
-};
-
-// MIPS SIMD (MSA) register
-class MSARegister : public RegisterBase<MSARegister, kMsaAfterLast> {
-  friend class RegisterBase;
-  explicit constexpr MSARegister(int code) : RegisterBase(code) {}
 };
 
 // A few double registers are reserved: one as a scratch register and one to
@@ -294,11 +219,13 @@ constexpr Register cp = s7;
 constexpr Register kScratchReg = s3;
 constexpr Register kScratchReg2 = s4;
 constexpr DoubleRegister kScratchDoubleReg = f30;
+// FPU zero reg is often used to hold 0.0, but it's not hardwired to 0.0.
 constexpr DoubleRegister kDoubleRegZero = f28;
 // Used on mips64r6 for compare operations.
 // We use the last non-callee saved odd register for N64 ABI
 constexpr DoubleRegister kDoubleCompareReg = f23;
 // MSA zero and scratch regs must have the same numbers as FPU zero and scratch
+// MSA zero reg is often used to hold 0, but it's not hardwired to 0.
 constexpr Simd128Register kSimd128RegZero = w28;
 constexpr Simd128Register kSimd128ScratchReg = w30;
 
@@ -358,13 +285,18 @@ DEFINE_REGISTER_NAMES(FPURegister, DOUBLE_REGISTERS)
 DEFINE_REGISTER_NAMES(MSARegister, SIMD128_REGISTERS)
 
 // Give alias names to registers for calling conventions.
+
+constexpr Register arg_reg_1 = a0;
+constexpr Register arg_reg_2 = a1;
+constexpr Register arg_reg_3 = a2;
+constexpr Register arg_reg_4 = a3;
+
 constexpr Register kReturnRegister0 = v0;
 constexpr Register kReturnRegister1 = v1;
 constexpr Register kReturnRegister2 = a0;
 constexpr Register kJSFunctionRegister = a1;
 constexpr Register kContextRegister = s7;
 constexpr Register kAllocateSizeRegister = a0;
-constexpr Register kSpeculationPoisonRegister = a7;
 constexpr Register kInterpreterAccumulatorRegister = v0;
 constexpr Register kInterpreterBytecodeOffsetRegister = t0;
 constexpr Register kInterpreterBytecodeArrayRegister = t1;
@@ -376,12 +308,13 @@ constexpr Register kJavaScriptCallTargetRegister = kJSFunctionRegister;
 constexpr Register kJavaScriptCallNewTargetRegister = a3;
 constexpr Register kJavaScriptCallExtraArg1Register = a2;
 
-constexpr Register kOffHeapTrampolineRegister = at;
 constexpr Register kRuntimeCallFunctionRegister = a1;
 constexpr Register kRuntimeCallArgCountRegister = a0;
 constexpr Register kRuntimeCallArgvRegister = a2;
 constexpr Register kWasmInstanceRegister = a0;
 constexpr Register kWasmCompileLazyFuncIndexRegister = t0;
+
+constexpr DoubleRegister kFPReturnRegister0 = f0;
 
 }  // namespace internal
 }  // namespace v8

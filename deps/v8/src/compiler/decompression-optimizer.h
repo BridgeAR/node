@@ -39,6 +39,8 @@ class V8_EXPORT_PRIVATE DecompressionOptimizer final {
                          CommonOperatorBuilder* common,
                          MachineOperatorBuilder* machine);
   ~DecompressionOptimizer() = default;
+  DecompressionOptimizer(const DecompressionOptimizer&) = delete;
+  DecompressionOptimizer& operator=(const DecompressionOptimizer&) = delete;
 
   // Assign States to the nodes, and then change the node's Operator to use the
   // compressed version if possible.
@@ -67,6 +69,9 @@ class V8_EXPORT_PRIVATE DecompressionOptimizer final {
   // Change node's load into a compressed one.
   void ChangeLoad(Node* const node);
 
+  // Change node's 64-bit bitwise operator into a compressed one.
+  void ChangeWord64BitwiseOp(Node* const node, const Operator* new_op);
+
   // Go through the already marked nodes and changed the operation for the nodes
   // that can use compressed outputs.
   void ChangeNodes();
@@ -80,6 +85,8 @@ class V8_EXPORT_PRIVATE DecompressionOptimizer final {
   // Mark node's input as appropriate, according to node's opcode. Some input
   // State may be updated, and therefore has to be revisited.
   void MarkNodeInputs(Node* node);
+
+  void MarkAddressingBase(Node* base);
 
   // Mark node's State to be state. We only do this if we have new information,
   // i.e either if:
@@ -114,8 +121,6 @@ class V8_EXPORT_PRIVATE DecompressionOptimizer final {
   // themselves. In a way, it functions as a NodeSet since each node will be
   // contained at most once. It's a Vector since we care about insertion speed.
   NodeVector compressed_candidate_nodes_;
-
-  DISALLOW_COPY_AND_ASSIGN(DecompressionOptimizer);
 };
 
 }  // namespace compiler

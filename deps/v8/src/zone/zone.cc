@@ -5,10 +5,12 @@
 #include "src/zone/zone.h"
 
 #include <cstring>
+#include <memory>
 
+#include "src/base/sanitizer/asan.h"
 #include "src/init/v8.h"
-#include "src/sanitizer/asan.h"
 #include "src/utils/utils.h"
+#include "src/zone/type-stats.h"
 
 namespace v8 {
 namespace internal {
@@ -27,23 +29,17 @@ constexpr size_t kASanRedzoneBytes = 0;
 
 }  // namespace
 
-Zone::Zone(AccountingAllocator* allocator, const char* name)
-    : allocation_size_(0),
-      segment_bytes_allocated_(0),
-      position_(0),
-      limit_(0),
-      allocator_(allocator),
-      segment_head_(nullptr),
+Zone::Zone(AccountingAllocator* allocator, const char* name,
+           bool support_compression)
+    : allocator_(allocator),
       name_(name),
-      sealed_(false) {
-  allocator_->ZoneCreation(this);
+      supports_compression_(support_compression) {
+  allocator_->TraceZoneCreation(this);
 }
 
 Zone::~Zone() {
-  allocator_->ZoneDestruction(this);
   DeleteAll();
-
-  DCHECK_EQ(segment_bytes_allocated_, 0);
+  DCHECK_EQ(segment_bytes_allocated_.load(), 0);
 }
 
 void* Zone::AsanNew(size_t size) {
@@ -53,15 +49,15 @@ void* Zone::AsanNew(size_t size) {
   size = RoundUp(size, kAlignmentInBytes);
 
   // Check if the requested size is available without expanding.
-  Address result = position_;
-
   const size_t size_with_redzone = size + kASanRedzoneBytes;
   DCHECK_LE(position_, limit_);
-  if (size_with_redzone > limit_ - position_) {
-    result = NewExpand(size_with_redzone);
-  } else {
-    position_ += size_with_redzone;
+  if (V8_UNLIKELY(size_with_redzone > limit_ - position_)) {
+    Expand(size_with_redzone);
   }
+  DCHECK_LE(size_with_redzone, limit_ - position_);
+
+  Address result = position_;
+  position_ += size_with_redzone;
 
   Address redzone_position = result + size;
   DCHECK_EQ(redzone_position + kASanRedzoneBytes, position_);
@@ -73,53 +69,71 @@ void* Zone::AsanNew(size_t size) {
   return reinterpret_cast<void*>(result);
 }
 
-void Zone::ReleaseMemory() {
-  allocator_->ZoneDestruction(this);
+void Zone::Reset() {
+  if (!segment_head_) return;
+  Segment* keep = segment_head_;
+  segment_head_ = segment_head_->next();
+  if (segment_head_ != nullptr) {
+    // Reset the position to the end of the new head, and uncommit its
+    // allocation size (which will be re-committed in DeleteAll).
+    position_ = segment_head_->end();
+    allocation_size_ -= segment_head_->end() - segment_head_->start();
+  }
+  keep->set_next(nullptr);
   DeleteAll();
-  allocator_->ZoneCreation(this);
+  allocator_->TraceZoneCreation(this);
+
+  // Un-poison the kept segment content so we can zap and re-use it.
+  ASAN_UNPOISON_MEMORY_REGION(reinterpret_cast<void*>(keep->start()),
+                              keep->capacity());
+  keep->ZapContents();
+
+  segment_head_ = keep;
+  position_ = RoundUp(keep->start(), kAlignmentInBytes);
+  limit_ = keep->end();
+  DCHECK_LT(allocation_size(), kAlignmentInBytes);
+  DCHECK_EQ(segment_bytes_allocated_, keep->total_size());
 }
 
 void Zone::DeleteAll() {
+  Segment* current = segment_head_;
+  if (current) {
+    // Commit the allocation_size_ of segment_head_ and disconnect the segments
+    // list from the zone in order to ensure that tracing accounting allocator
+    // will observe value including memory from the head segment.
+    allocation_size_ = allocation_size();
+    segment_head_ = nullptr;
+  }
+  allocator_->TraceZoneDestruction(this);
+
   // Traverse the chained list of segments and return them all to the allocator.
-  for (Segment* current = segment_head_; current;) {
+  while (current) {
     Segment* next = current->next();
-    size_t size = current->total_size();
-
-    // Un-poison the segment content so we can re-use or zap it later.
-    ASAN_UNPOISON_MEMORY_REGION(reinterpret_cast<void*>(current->start()),
-                                current->capacity());
-
-    segment_bytes_allocated_ -= size;
-    allocator_->ReturnSegment(current);
+    segment_bytes_allocated_ -= current->total_size();
+    ReleaseSegment(current);
     current = next;
   }
 
   position_ = limit_ = 0;
   allocation_size_ = 0;
-  segment_head_ = nullptr;
+#ifdef V8_ENABLE_PRECISE_ZONE_STATS
+  allocation_size_for_tracing_ = 0;
+#endif
 }
 
-// Creates a new segment, sets its size, and pushes it to the front
-// of the segment chain. Returns the new segment.
-Segment* Zone::NewSegment(size_t requested_size) {
-  Segment* result = allocator_->AllocateSegment(requested_size);
-  if (!result) return nullptr;
-  DCHECK_GE(result->total_size(), requested_size);
-  segment_bytes_allocated_ += result->total_size();
-  result->set_zone(this);
-  result->set_next(segment_head_);
-  segment_head_ = result;
-  return result;
+void Zone::ReleaseSegment(Segment* segment) {
+  // Un-poison the segment content so we can re-use or zap it later.
+  ASAN_UNPOISON_MEMORY_REGION(reinterpret_cast<void*>(segment->start()),
+                              segment->capacity());
+  allocator_->ReturnSegment(segment, supports_compression());
 }
 
-Address Zone::NewExpand(size_t size) {
+void Zone::Expand(size_t size) {
   // Make sure the requested size is already properly aligned and that
   // there isn't enough room in the Zone to satisfy the request.
   DCHECK_EQ(size, RoundDown(size, kAlignmentInBytes));
-  DCHECK(limit_ - position_ < size);
+  DCHECK_LT(limit_ - position_, size);
 
-  // Commit the allocation_size_ of segment_head_ if any.
-  allocation_size_ = allocation_size();
   // Compute the new segment size. We use a 'high water mark'
   // strategy, where we increase the segment size every time we expand
   // except that we employ a maximum segment size when we delete. This
@@ -133,7 +147,6 @@ Address Zone::NewExpand(size_t size) {
   // Guard against integer overflow.
   if (new_size_no_overhead < size || new_size < kSegmentOverhead) {
     V8::FatalProcessOutOfMemory(nullptr, "Zone");
-    return kNullAddress;
   }
   if (new_size < kMinimumSegmentSize) {
     new_size = kMinimumSegmentSize;
@@ -142,28 +155,76 @@ Address Zone::NewExpand(size_t size) {
     // exponentially, thus putting pressure on contiguous virtual address space.
     // All the while making sure to allocate a segment large enough to hold the
     // requested size.
-    new_size = Max(min_new_size, kMaximumSegmentSize);
+    new_size = std::max({min_new_size, kMaximumSegmentSize});
   }
   if (new_size > INT_MAX) {
     V8::FatalProcessOutOfMemory(nullptr, "Zone");
-    return kNullAddress;
   }
-  Segment* segment = NewSegment(new_size);
+  Segment* segment =
+      allocator_->AllocateSegment(new_size, supports_compression());
   if (segment == nullptr) {
     V8::FatalProcessOutOfMemory(nullptr, "Zone");
-    return kNullAddress;
   }
 
+  DCHECK_GE(segment->total_size(), new_size);
+  segment_bytes_allocated_ += segment->total_size();
+  segment->set_zone(this);
+  segment->set_next(segment_head_);
+  // Commit the allocation_size_ of segment_head_ if any, in order to ensure
+  // that tracing accounting allocator will observe value including memory
+  // from the previous head segment.
+  allocation_size_ = allocation_size();
+  segment_head_ = segment;
+  allocator_->TraceAllocateSegment(segment);
+
   // Recompute 'top' and 'limit' based on the new segment.
-  Address result = RoundUp(segment->start(), kAlignmentInBytes);
-  position_ = result + size;
-  // Check for address overflow.
-  // (Should not happen since the segment is guaranteed to accommodate
-  // size bytes + header and alignment padding)
-  DCHECK(position_ >= result);
+  position_ = RoundUp(segment->start(), kAlignmentInBytes);
   limit_ = segment->end();
-  DCHECK(position_ <= limit_);
-  return result;
+  DCHECK_LE(position_, limit_);
+  DCHECK_LE(size, limit_ - position_);
+}
+
+ZoneScope::ZoneScope(Zone* zone)
+    : zone_(zone),
+#ifdef V8_ENABLE_PRECISE_ZONE_STATS
+      allocation_size_for_tracing_(zone->allocation_size_for_tracing_),
+      freed_size_for_tracing_(zone->freed_size_for_tracing_),
+#endif
+      allocation_size_(zone->allocation_size_),
+      segment_bytes_allocated_(zone->segment_bytes_allocated_),
+      position_(zone->position_),
+      limit_(zone->limit_),
+      segment_head_(zone->segment_head_) {
+}
+
+ZoneScope::~ZoneScope() {
+  // Release segments up to the stored segment_head_.
+  Segment* current = zone_->segment_head_;
+  while (current != segment_head_) {
+    Segment* next = current->next();
+    zone_->ReleaseSegment(current);
+    current = next;
+  }
+
+  // Un-poison the trailing segment content so we can re-use or zap it later.
+  if (segment_head_ != nullptr) {
+    void* const start = reinterpret_cast<void*>(position_);
+    DCHECK_GE(start, reinterpret_cast<void*>(current->start()));
+    DCHECK_LE(start, reinterpret_cast<void*>(current->end()));
+    const size_t length = current->end() - reinterpret_cast<Address>(start);
+    ASAN_UNPOISON_MEMORY_REGION(start, length);
+  }
+
+  // Reset the Zone to the stored state.
+  zone_->allocation_size_ = allocation_size_;
+  zone_->segment_bytes_allocated_ = segment_bytes_allocated_;
+  zone_->position_ = position_;
+  zone_->limit_ = limit_;
+  zone_->segment_head_ = segment_head_;
+#ifdef V8_ENABLE_PRECISE_ZONE_STATS
+  zone_->allocation_size_for_tracing_ = allocation_size_for_tracing_;
+  zone_->freed_size_for_tracing_ = freed_size_for_tracing_;
+#endif
 }
 
 }  // namespace internal

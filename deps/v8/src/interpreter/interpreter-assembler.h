@@ -5,13 +5,12 @@
 #ifndef V8_INTERPRETER_INTERPRETER_ASSEMBLER_H_
 #define V8_INTERPRETER_INTERPRETER_ASSEMBLER_H_
 
-#include "src/builtins/builtins.h"
 #include "src/codegen/code-stub-assembler.h"
 #include "src/common/globals.h"
 #include "src/interpreter/bytecode-register.h"
 #include "src/interpreter/bytecodes.h"
+#include "src/objects/bytecode-array.h"
 #include "src/runtime/runtime.h"
-#include "src/utils/allocation.h"
 
 namespace v8 {
 namespace internal {
@@ -22,13 +21,18 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   InterpreterAssembler(compiler::CodeAssemblerState* state, Bytecode bytecode,
                        OperandScale operand_scale);
   ~InterpreterAssembler();
+  InterpreterAssembler(const InterpreterAssembler&) = delete;
+  InterpreterAssembler& operator=(const InterpreterAssembler&) = delete;
 
   // Returns the 32-bit unsigned count immediate for bytecode operand
   // |operand_index| in the current bytecode.
   TNode<Uint32T> BytecodeOperandCount(int operand_index);
   // Returns the 32-bit unsigned flag for bytecode operand |operand_index|
   // in the current bytecode.
-  TNode<Uint32T> BytecodeOperandFlag(int operand_index);
+  TNode<Uint32T> BytecodeOperandFlag8(int operand_index);
+  // Returns the 32-bit unsigned 2-byte flag for bytecode operand
+  // |operand_index| in the current bytecode.
+  TNode<Uint32T> BytecodeOperandFlag16(int operand_index);
   // Returns the 32-bit zero-extended index immediate for bytecode operand
   // |operand_index| in the current bytecode.
   TNode<Uint32T> BytecodeOperandIdxInt32(int operand_index);
@@ -71,6 +75,7 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Accumulator.
   TNode<Object> GetAccumulator();
   void SetAccumulator(TNode<Object> value);
+  void ClobberAccumulator(TNode<Object> clobber_value);
 
   // Context.
   TNode<Context> GetContext();
@@ -79,11 +84,6 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Context at |depth| in the context chain starting at |context|.
   TNode<Context> GetContextAtDepth(TNode<Context> context,
                                    TNode<Uint32T> depth);
-
-  // Goto the given |target| if the context chain starting at |context| has any
-  // extensions up to the given |depth|.
-  void GotoIfHasContextExtensionUpToDepth(TNode<Context> context,
-                                          TNode<Uint32T> depth, Label* target);
 
   // A RegListNodePair provides an abstraction over lists of registers.
   class RegListNodePair {
@@ -143,9 +143,27 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Load and untag constant at |index| in the constant pool.
   TNode<IntPtrT> LoadAndUntagConstantPoolEntry(TNode<WordT> index);
 
-  // Load the FeedbackVector for the current function. The retuned node could be
-  // undefined.
+  TNode<JSFunction> LoadFunctionClosure();
+
+  // Load the FeedbackVector for the current function. The returned node could
+  // be undefined.
   TNode<HeapObject> LoadFeedbackVector();
+
+  TNode<HeapObject> LoadFeedbackVectorOrUndefinedIfJitless() {
+#ifndef V8_JITLESS
+    return LoadFeedbackVector();
+#else
+    return UndefinedConstant();
+#endif  // V8_JITLESS
+  }
+
+  static constexpr UpdateFeedbackMode DefaultUpdateFeedbackMode() {
+#ifndef V8_JITLESS
+    return UpdateFeedbackMode::kOptionalFeedback;
+#else
+    return UpdateFeedbackMode::kNoFeedback;
+#endif  // !V8_JITLESS
+  }
 
   // Call JSFunction or Callable |function| with |args| arguments, possibly
   // including the receiver depending on |receiver_mode|. After the call returns
@@ -169,8 +187,7 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   void CallJSWithSpreadAndDispatch(TNode<Object> function,
                                    TNode<Context> context,
                                    const RegListNodePair& args,
-                                   TNode<UintPtrT> slot_id,
-                                   TNode<HeapObject> maybe_feedback_vector);
+                                   TNode<UintPtrT> slot_id);
 
   // Call constructor |target| with |args| arguments (not including receiver).
   // The |new_target| is the same as the |target| for the new keyword, but
@@ -188,15 +205,12 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
                                     TNode<Context> context,
                                     TNode<Object> new_target,
                                     const RegListNodePair& args,
-                                    TNode<UintPtrT> slot_id,
-                                    TNode<HeapObject> maybe_feedback_vector);
+                                    TNode<UintPtrT> slot_id);
 
-  // Call runtime function with |args| arguments which will return |return_size|
-  // number of values.
-  compiler::Node* CallRuntimeN(TNode<Uint32T> function_id,
-                               TNode<Context> context,
-                               const RegListNodePair& args,
-                               int return_size = 1);
+  // Call runtime function with |args| arguments.
+  template <class T = Object>
+  TNode<T> CallRuntimeN(TNode<Uint32T> function_id, TNode<Context> context,
+                        const RegListNodePair& args, int return_count);
 
   // Jump forward relative to the current bytecode by the |jump_offset|.
   void Jump(TNode<IntPtrT> jump_offset);
@@ -209,16 +223,49 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   void JumpIfTaggedEqual(TNode<Object> lhs, TNode<Object> rhs,
                          TNode<IntPtrT> jump_offset);
 
+  // Jump forward relative to the current bytecode by offest specified in
+  // operand |operand_index| if the word values |lhs| and |rhs| are equal.
+  void JumpIfTaggedEqual(TNode<Object> lhs, TNode<Object> rhs,
+                         int operand_index);
+
+  // Jump forward relative to the current bytecode by offest specified from the
+  // constant pool if the word values |lhs| and |rhs| are equal.
+  // The constant's index is specified in operand |operand_index|.
+  void JumpIfTaggedEqualConstant(TNode<Object> lhs, TNode<Object> rhs,
+                                 int operand_index);
+
   // Jump forward relative to the current bytecode by |jump_offset| if the
   // word values |lhs| and |rhs| are not equal.
   void JumpIfTaggedNotEqual(TNode<Object> lhs, TNode<Object> rhs,
                             TNode<IntPtrT> jump_offset);
 
+  // Jump forward relative to the current bytecode by offest specified in
+  // operand |operand_index| if the word values |lhs| and |rhs| are not equal.
+  void JumpIfTaggedNotEqual(TNode<Object> lhs, TNode<Object> rhs,
+                            int operand_index);
+
+  // Jump forward relative to the current bytecode by offest specified from the
+  // constant pool if the word values |lhs| and |rhs| are not equal.
+  // The constant's index is specified in operand |operand_index|.
+  void JumpIfTaggedNotEqualConstant(TNode<Object> lhs, TNode<Object> rhs,
+                                    int operand_index);
+
   // Updates the profiler interrupt budget for a return.
   void UpdateInterruptBudgetOnReturn();
 
-  // Returns the OSR nesting level from the bytecode header.
-  TNode<Int8T> LoadOsrNestingLevel();
+  // Adjusts the interrupt budget by the provided weight. Returns the new
+  // budget.
+  TNode<Int32T> UpdateInterruptBudget(TNode<Int32T> weight);
+  // Decrements the bytecode array's interrupt budget by a 32-bit unsigned
+  // |weight| and calls Runtime::kInterrupt if counter reaches zero.
+  enum StackCheckBehavior {
+    kEnableStackCheck,
+    kDisableStackCheck,
+  };
+  void DecreaseInterruptBudget(TNode<Int32T> weight,
+                               StackCheckBehavior stack_check_behavior);
+
+  TNode<Int8T> LoadOsrState(TNode<FeedbackVector> feedback_vector);
 
   // Dispatch to the bytecode.
   void Dispatch();
@@ -231,6 +278,12 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   void DispatchToBytecode(TNode<WordT> target_bytecode,
                           TNode<IntPtrT> new_bytecode_offset);
 
+  // Dispatches to |target_bytecode| at BytecodeOffset(). Includes short-star
+  // lookahead if the current bytecode_ is likely followed by a short-star
+  // instruction.
+  void DispatchToBytecodeWithOptionalStarLookahead(
+      TNode<WordT> target_bytecode);
+
   // Abort with the given abort reason.
   void Abort(AbortReason abort_reason);
   void AbortIfWordNotEqual(TNode<WordT> lhs, TNode<WordT> rhs,
@@ -240,8 +293,23 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
       TNode<FixedArrayBase> parameters_and_registers,
       TNode<IntPtrT> formal_parameter_count, TNode<UintPtrT> register_count);
 
-  // Dispatch to frame dropper trampoline if necessary.
-  void MaybeDropFrames(TNode<Context> context);
+  // Attempts to OSR.
+  enum OnStackReplacementParams {
+    kBaselineCodeIsCached,
+    kDefault,
+  };
+  void OnStackReplacement(TNode<Context> context,
+                          TNode<FeedbackVector> feedback_vector,
+                          TNode<IntPtrT> relative_jump,
+                          TNode<Int32T> loop_depth,
+                          TNode<IntPtrT> feedback_slot, TNode<Int8T> osr_state,
+                          OnStackReplacementParams params);
+
+  // The BytecodeOffset() is the offset from the ByteCodeArray pointer; to
+  // translate into runtime `BytecodeOffset` (defined in utils.h as the offset
+  // from the start of the bytecode section), this constant has to be applied.
+  static constexpr int kFirstBytecodeOffset =
+      BytecodeArray::kHeaderSize - kHeapObjectTag;
 
   // Returns the offset from the BytecodeArrayPointer of the current bytecode.
   TNode<IntPtrT> BytecodeOffset();
@@ -251,6 +319,11 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   static bool TargetSupportsUnalignedAccess();
 
   void ToNumberOrNumeric(Object::Conversion mode);
+
+  void StoreRegisterForShortStar(TNode<Object> value, TNode<WordT> opcode);
+
+  // Load the bytecode at |bytecode_offset|.
+  TNode<WordT> LoadBytecode(TNode<IntPtrT> bytecode_offset);
 
  private:
   // Returns a pointer to the current function's BytecodeArray object.
@@ -286,11 +359,6 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Traces the current bytecode by calling |function_id|.
   void TraceBytecode(Runtime::FunctionId function_id);
 
-  // Updates the bytecode array's interrupt budget by a 32-bit unsigned |weight|
-  // and calls Runtime::kInterrupt if counter reaches zero. If |backward|, then
-  // the interrupt budget is decremented, otherwise it is incremented.
-  void UpdateInterruptBudget(TNode<Int32T> weight, bool backward);
-
   // Returns the offset of register |index| relative to RegisterFilePointer().
   TNode<IntPtrT> RegisterFrameOffset(TNode<IntPtrT> index);
 
@@ -302,61 +370,53 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // The |result_type| determines the size and signedness.  of the
   // value read. This method should only be used on architectures that
   // do not support unaligned memory accesses.
-  TNode<Word32T> BytecodeOperandReadUnaligned(
-      int relative_offset, MachineType result_type,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
+  TNode<Word32T> BytecodeOperandReadUnaligned(int relative_offset,
+                                              MachineType result_type);
 
   // Returns zero- or sign-extended to word32 value of the operand.
-  TNode<Uint8T> BytecodeOperandUnsignedByte(
-      int operand_index,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
-  TNode<Int8T> BytecodeOperandSignedByte(
-      int operand_index,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
-  TNode<Uint16T> BytecodeOperandUnsignedShort(
-      int operand_index,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
-  TNode<Int16T> BytecodeOperandSignedShort(
-      int operand_index,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
-  TNode<Uint32T> BytecodeOperandUnsignedQuad(
-      int operand_index,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
-  TNode<Int32T> BytecodeOperandSignedQuad(
-      int operand_index,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
+  TNode<Uint8T> BytecodeOperandUnsignedByte(int operand_index);
+  TNode<Int8T> BytecodeOperandSignedByte(int operand_index);
+  TNode<Uint16T> BytecodeOperandUnsignedShort(int operand_index);
+  TNode<Int16T> BytecodeOperandSignedShort(int operand_index);
+  TNode<Uint32T> BytecodeOperandUnsignedQuad(int operand_index);
+  TNode<Int32T> BytecodeOperandSignedQuad(int operand_index);
 
   // Returns zero- or sign-extended to word32 value of the operand of
   // given size.
-  TNode<Int32T> BytecodeSignedOperand(
-      int operand_index, OperandSize operand_size,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
-  TNode<Uint32T> BytecodeUnsignedOperand(
-      int operand_index, OperandSize operand_size,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
+  TNode<Int32T> BytecodeSignedOperand(int operand_index,
+                                      OperandSize operand_size);
+  TNode<Uint32T> BytecodeUnsignedOperand(int operand_index,
+                                         OperandSize operand_size);
 
   // Returns the word-size sign-extended register index for bytecode operand
-  // |operand_index| in the current bytecode. Value is not poisoned on
-  // speculation since the value loaded from the register is poisoned instead.
-  TNode<IntPtrT> BytecodeOperandReg(
-      int operand_index,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
+  // |operand_index| in the current bytecode.
+  TNode<IntPtrT> BytecodeOperandReg(int operand_index);
 
   // Returns the word zero-extended index immediate for bytecode operand
-  // |operand_index| in the current bytecode for use when loading a .
-  TNode<UintPtrT> BytecodeOperandConstantPoolIdx(
-      int operand_index,
-      LoadSensitivity needs_poisoning = LoadSensitivity::kCritical);
+  // |operand_index| in the current bytecode for use when loading a constant
+  // pool element.
+  TNode<UintPtrT> BytecodeOperandConstantPoolIdx(int operand_index);
 
-  // Jump relative to the current bytecode by the |jump_offset|. If |backward|,
-  // then jump backward (subtract the offset), otherwise jump forward (add the
-  // offset). Helper function for Jump and JumpBackward.
-  void Jump(TNode<IntPtrT> jump_offset, bool backward);
+  // Jump to a specific bytecode offset.
+  void JumpToOffset(TNode<IntPtrT> new_bytecode_offset);
 
   // Jump forward relative to the current bytecode by |jump_offset| if the
   // |condition| is true. Helper function for JumpIfTaggedEqual and
   // JumpIfTaggedNotEqual.
   void JumpConditional(TNode<BoolT> condition, TNode<IntPtrT> jump_offset);
+
+  // Jump forward relative to the current bytecode by offest specified in
+  // operand |operand_index| if the |condition| is true. Helper function for
+  // JumpIfTaggedEqual and JumpIfTaggedNotEqual.
+  void JumpConditionalByImmediateOperand(TNode<BoolT> condition,
+                                         int operand_index);
+
+  // Jump forward relative to the current bytecode by offest specified from the
+  // constant pool if the |condition| is true. The constant's index is specified
+  // in operand |operand_index|. Helper function for JumpIfTaggedEqualConstant
+  // and JumpIfTaggedNotEqualConstant.
+  void JumpConditionalByConstantOperand(TNode<BoolT> condition,
+                                        int operand_index);
 
   // Save the bytecode offset to the interpreter frame.
   void SaveBytecodeOffset();
@@ -370,18 +430,16 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Updates and returns BytecodeOffset() advanced by delta bytecodes.
   // Traces the exit of the current bytecode.
   TNode<IntPtrT> Advance(int delta);
-  TNode<IntPtrT> Advance(TNode<IntPtrT> delta, bool backward = false);
+  TNode<IntPtrT> Advance(TNode<IntPtrT> delta);
 
-  // Load the bytecode at |bytecode_offset|.
-  TNode<WordT> LoadBytecode(TNode<IntPtrT> bytecode_offset);
+  // Look ahead for short Star and inline it in a branch, including subsequent
+  // dispatch. Anything after this point can assume that the following
+  // instruction was not a short Star.
+  void StarDispatchLookahead(TNode<WordT> target_bytecode);
 
-  // Look ahead for Star and inline it in a branch. Returns a new target
-  // bytecode node for dispatch.
-  TNode<WordT> StarDispatchLookahead(TNode<WordT> target_bytecode);
-
-  // Build code for Star at the current BytecodeOffset() and Advance() to the
-  // next dispatch offset.
-  void InlineStar();
+  // Build code for short Star at the current BytecodeOffset() and Advance() to
+  // the next dispatch offset.
+  void InlineShortStar(TNode<WordT> target_bytecode);
 
   // Dispatch to the bytecode handler with code entry point |handler_entry|.
   void DispatchToBytecodeHandlerEntry(TNode<RawPtrT> handler_entry,
@@ -398,12 +456,10 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   CodeStubAssembler::TVariable<IntPtrT> bytecode_offset_;
   CodeStubAssembler::TVariable<ExternalReference> dispatch_table_;
   CodeStubAssembler::TVariable<Object> accumulator_;
-  AccumulatorUse accumulator_use_;
+  ImplicitRegisterUse implicit_register_use_;
   bool made_call_;
   bool reloaded_frame_ptr_;
   bool bytecode_array_valid_;
-
-  DISALLOW_COPY_AND_ASSIGN(InterpreterAssembler);
 };
 
 }  // namespace interpreter

@@ -6,7 +6,6 @@ common.skipIfInspectorDisabled();
 const assert = require('assert');
 const EventEmitter = require('events');
 const { Session } = require('inspector');
-const { pathToFileURL } = require('url');
 const {
   Worker, isMainThread, parentPort, workerData
 } = require('worker_threads');
@@ -106,7 +105,6 @@ class WorkerSession extends EventEmitter {
     this.post(command);
     const notification = await notificationPromise;
     const callFrame = notification.params.callFrames[0];
-    assert.strictEqual(callFrame.url, pathToFileURL(script).toString());
     assert.strictEqual(callFrame.location.lineNumber, line);
   }
 
@@ -128,14 +126,12 @@ class WorkerSession extends EventEmitter {
 }
 
 async function testBasicWorkerDebug(session, post) {
-  /*
-    1. Do 'enable' with waitForDebuggerOnStart = true
-    2. Run worker. It should break on start.
-    3. Enable Runtime (to get console message) and Debugger. Resume.
-    4. Breaks on the 'debugger' statement. Resume.
-    5. Console message received, worker runs to a completion.
-    6. contextCreated/contextDestroyed had been properly dispatched
-  */
+  // 1. Do 'enable' with waitForDebuggerOnStart = true
+  // 2. Run worker. It should break on start.
+  // 3. Enable Runtime (to get console message) and Debugger. Resume.
+  // 4. Breaks on the 'debugger' statement. Resume.
+  // 5. Console message received, worker runs to a completion.
+  // 6. contextCreated/contextDestroyed had been properly dispatched
   console.log('Test basic debug scenario');
   await post('NodeWorker.enable', { waitForDebuggerOnStart: true });
   const attached = waitForWorkerAttach(session);
@@ -146,7 +142,7 @@ async function testBasicWorkerDebug(session, post) {
   const workerSession = new WorkerSession(session, sessionId);
   const contextEventPromises = Promise.all([
     waitForEvent(workerSession, 'Runtime.executionContextCreated'),
-    waitForEvent(workerSession, 'Runtime.executionContextDestroyed')
+    waitForEvent(workerSession, 'Runtime.executionContextDestroyed'),
   ]);
   const consolePromise = waitForEvent(workerSession, 'Runtime.consoleAPICalled')
       .then((notification) => notification.params.args[0].value);
@@ -155,7 +151,7 @@ async function testBasicWorkerDebug(session, post) {
   await workerSession.waitForBreakAfterCommand(
     'Runtime.runIfWaitingForDebugger', __filename, 1);
   await workerSession.waitForBreakAfterCommand(
-    'Debugger.resume', __filename, 26);  // V8 line number is zero-based
+    'Debugger.resume', __filename, 25);  // V8 line number is zero-based
   const msg = await consolePromise;
   assert.strictEqual(msg, workerMessage);
   workerSession.post('Debugger.resume');
@@ -221,7 +217,7 @@ async function testWaitForDisconnectInWorker(session, post) {
 
   const attached = [
     waitForWorkerAttach(session),
-    waitForWorkerAttach(sessionWithoutWaiting)
+    waitForWorkerAttach(sessionWithoutWaiting),
   ];
 
   let worker = null;

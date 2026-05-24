@@ -16,28 +16,24 @@ class TypedArrayBuiltinsAssembler : public CodeStubAssembler {
   explicit TypedArrayBuiltinsAssembler(compiler::CodeAssemblerState* state)
       : CodeStubAssembler(state) {}
 
-  void GenerateTypedArrayPrototypeIterationMethod(TNode<Context> context,
-                                                  TNode<Object> receiver,
-                                                  const char* method_name,
-                                                  IterationKind iteration_kind);
-
   void SetupTypedArrayEmbedderFields(TNode<JSTypedArray> holder);
   void AttachBuffer(TNode<JSTypedArray> holder, TNode<JSArrayBuffer> buffer,
                     TNode<Map> map, TNode<Smi> length,
                     TNode<UintPtrT> byte_offset);
 
-  TNode<JSArrayBuffer> AllocateEmptyOnHeapBuffer(TNode<Context> context,
-                                                 TNode<UintPtrT> byte_length);
+  TNode<JSArrayBuffer> AllocateEmptyOnHeapBuffer(TNode<Context> context);
 
   TNode<Map> LoadMapForType(TNode<JSTypedArray> array);
   TNode<BoolT> IsMockArrayBufferAllocatorFlag();
   TNode<UintPtrT> CalculateExternalPointer(TNode<UintPtrT> backing_store,
                                            TNode<UintPtrT> byte_offset);
 
-  // Returns true if kind is either UINT8_ELEMENTS or UINT8_CLAMPED_ELEMENTS.
+  // Returns true if kind is either UINT8_ELEMENTS, UINT8_CLAMPED_ELEMENTS,
+  // RAB_GSAB_UINT8_ELEMENTS, or RAB_GSAB_UINT8_CLAMPED_ELEMENTS.
   TNode<BoolT> IsUint8ElementsKind(TNode<Int32T> kind);
 
-  // Returns true if kind is either BIGINT64_ELEMENTS or BIGUINT64_ELEMENTS.
+  // Returns true if kind is either BIGINT64_ELEMENTS, BIGUINT64_ELEMENTS,
+  // RAB_GSAB_BIGINT64_ELEMENTS, or RAB_GSAB_BIGUINT64_ELEMENTS.
   TNode<BoolT> IsBigInt64ElementsKind(TNode<Int32T> kind);
 
   // Returns the byte size of an element for a TypedArray elements kind.
@@ -50,18 +46,25 @@ class TypedArrayBuiltinsAssembler : public CodeStubAssembler {
   TNode<JSFunction> GetDefaultConstructor(TNode<Context> context,
                                           TNode<JSTypedArray> exemplar);
 
-  TNode<JSArrayBuffer> GetBuffer(TNode<Context> context,
-                                 TNode<JSTypedArray> array);
-
   TNode<JSTypedArray> ValidateTypedArray(TNode<Context> context,
                                          TNode<Object> obj,
                                          const char* method_name);
 
+  TNode<UintPtrT> ValidateTypedArrayAndGetLength(TNode<Context> context,
+                                                 TNode<Object> obj,
+                                                 const char* method_name);
+
   void CallCMemmove(TNode<RawPtrT> dest_ptr, TNode<RawPtrT> src_ptr,
                     TNode<UintPtrT> byte_length);
 
+  void CallCRelaxedMemmove(TNode<RawPtrT> dest_ptr, TNode<RawPtrT> src_ptr,
+                           TNode<UintPtrT> byte_length);
+
   void CallCMemcpy(TNode<RawPtrT> dest_ptr, TNode<RawPtrT> src_ptr,
                    TNode<UintPtrT> byte_length);
+
+  void CallCRelaxedMemcpy(TNode<RawPtrT> dest_ptr, TNode<RawPtrT> src_ptr,
+                          TNode<UintPtrT> byte_length);
 
   void CallCMemset(TNode<RawPtrT> dest_ptr, TNode<IntPtrT> value,
                    TNode<UintPtrT> length);
@@ -101,7 +104,12 @@ class TypedArrayBuiltinsAssembler : public CodeStubAssembler {
                                           TNode<UintPtrT> index_node,
                                           TNode<Object> value,
                                           ElementsKind elements_kind,
-                                          Label* if_detached);
+                                          Label* if_detached_or_out_of_bounds);
+  template <typename TValue>
+  void StoreJSTypedArrayElementFromPreparedValue(
+      TNode<Context> context, TNode<JSTypedArray> typed_array,
+      TNode<UintPtrT> index_node, TNode<TValue> value,
+      ElementsKind elements_kind, Label* if_detached_or_out_of_bounds);
 };
 
 }  // namespace internal

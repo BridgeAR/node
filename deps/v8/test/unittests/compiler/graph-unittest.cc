@@ -4,7 +4,6 @@
 
 #include "test/unittests/compiler/graph-unittest.h"
 
-#include "src/compiler/js-heap-copy-reducer.h"
 #include "src/compiler/node-properties.h"
 #include "src/heap/factory.h"
 #include "src/objects/objects-inl.h"  // TODO(everyone): Make typer.h IWYU compliant.
@@ -15,19 +14,33 @@ namespace internal {
 namespace compiler {
 
 GraphTest::GraphTest(int num_parameters)
-    : canonical_(isolate()),
+    : TestWithNativeContextAndZone(kCompressGraphZone),
       common_(zone()),
       graph_(zone()),
-      broker_(isolate(), zone(), FLAG_trace_heap_broker, false),
+      broker_(isolate(), zone()),
+      broker_scope_(&broker_, isolate(), zone()),
+      current_broker_(&broker_),
       source_positions_(&graph_),
       node_origins_(&graph_) {
+  // PersistentHandlesScope currently requires an active handle before it can
+  // be opened and they can't be nested.
+  // TODO(v8:13897): Remove once PersistentHandlesScopes can be opened
+  // uncontionally.
+  if (!PersistentHandlesScope::IsActive(isolate())) {
+    Handle<Object> dummy(ReadOnlyRoots(isolate()->heap()).empty_string(),
+                         isolate());
+    persistent_scope_ = std::make_unique<PersistentHandlesScope>(isolate());
+  }
   graph()->SetStart(graph()->NewNode(common()->Start(num_parameters)));
   graph()->SetEnd(graph()->NewNode(common()->End(1), graph()->start()));
   broker()->SetTargetNativeContextRef(isolate()->native_context());
 }
 
-GraphTest::~GraphTest() = default;
-
+GraphTest::~GraphTest() {
+  if (persistent_scope_ != nullptr) {
+    persistent_scope_->Detach();
+  }
+}
 
 Node* GraphTest::Parameter(int32_t index) {
   return graph()->NewNode(common()->Parameter(index), graph()->start());
@@ -39,12 +52,12 @@ Node* GraphTest::Parameter(Type type, int32_t index) {
   return node;
 }
 
-Node* GraphTest::Float32Constant(volatile float value) {
+Node* GraphTest::Float32Constant(float value) {
   return graph()->NewNode(common()->Float32Constant(value));
 }
 
 
-Node* GraphTest::Float64Constant(volatile double value) {
+Node* GraphTest::Float64Constant(double value) {
   return graph()->NewNode(common()->Float64Constant(value));
 }
 
@@ -59,7 +72,7 @@ Node* GraphTest::Int64Constant(int64_t value) {
 }
 
 
-Node* GraphTest::NumberConstant(volatile double value) {
+Node* GraphTest::NumberConstant(double value) {
   return graph()->NewNode(common()->NumberConstant(value));
 }
 
@@ -92,11 +105,11 @@ Node* GraphTest::EmptyFrameState() {
       graph()->NewNode(common()->StateValues(0, SparseInputMask::Dense()));
   FrameStateFunctionInfo const* function_info =
       common()->CreateFrameStateFunctionInfo(
-          FrameStateType::kInterpretedFunction, 0, 0,
+          FrameStateType::kUnoptimizedFunction, 0, 0,
           Handle<SharedFunctionInfo>());
   return graph()->NewNode(
-      common()->FrameState(BailoutId::None(), OutputFrameStateCombine::Ignore(),
-                           function_info),
+      common()->FrameState(BytecodeOffset::None(),
+                           OutputFrameStateCombine::Ignore(), function_info),
       state_values, state_values, state_values, NumberConstant(0),
       UndefinedConstant(), graph()->start());
 }

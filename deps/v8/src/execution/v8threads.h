@@ -60,7 +60,7 @@ class ThreadVisitor {
 class ThreadManager {
  public:
   void Lock();
-  void Unlock();
+  V8_EXPORT_PRIVATE void Unlock();
 
   void InitThread(const ExecutionAccess&);
   void ArchiveThread();
@@ -72,6 +72,9 @@ class ThreadManager {
   void IterateArchivedThreads(ThreadVisitor* v);
   bool IsLockedByCurrentThread() const {
     return mutex_owner_.load(std::memory_order_relaxed) == ThreadId::Current();
+  }
+  bool IsLockedByThread(ThreadId id) const {
+    return mutex_owner_.load(std::memory_order_relaxed) == id;
   }
 
   ThreadId CurrentId();

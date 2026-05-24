@@ -14,7 +14,7 @@ const http2 = require('http2');
 
 const server = http2.createServer();
 server.on('stream', (stream) => {
-  stream.respondWithFile(__filename);
+  stream.respondWithFile(process.execPath);
 });
 server.listen(0, () => {
   const client = http2.connect(`http://localhost:${server.address().port}`);
@@ -28,8 +28,8 @@ server.listen(0, () => {
       {
         children: [
           // current_headers and/or queue could be empty
-          { node_name: 'Http2Stream', edge_name: 'wrapped' }
-        ]
+          { node_name: 'Http2Stream', edge_name: 'native_to_javascript' },
+        ],
       },
     ], { loose: true });
 
@@ -37,46 +37,46 @@ server.listen(0, () => {
     state.validateSnapshotNodes('Node / FileHandle', [
       {
         children: [
-          { node_name: 'FileHandle', edge_name: 'wrapped' }
+          { node_name: 'FileHandle', edge_name: 'native_to_javascript' },
           // current_headers could be empty
-        ]
-      }
+        ],
+      },
     ], { loose: true });
     state.validateSnapshotNodes('Node / TCPSocketWrap', [
       {
         children: [
-          { node_name: 'TCP', edge_name: 'wrapped' }
-        ]
-      }
+          { node_name: 'TCP', edge_name: 'native_to_javascript' },
+        ],
+      },
     ], { loose: true });
     state.validateSnapshotNodes('Node / TCPServerWrap', [
       {
         children: [
-          { node_name: 'TCP', edge_name: 'wrapped' }
-        ]
-      }
+          { node_name: 'TCP', edge_name: 'native_to_javascript' },
+        ],
+      },
     ], { loose: true });
     // `Node / StreamPipe` (C++) -> StreamPipe (JS)
     state.validateSnapshotNodes('Node / StreamPipe', [
       {
         children: [
-          { node_name: 'StreamPipe', edge_name: 'wrapped' }
-        ]
-      }
+          { node_name: 'StreamPipe', edge_name: 'native_to_javascript' },
+        ],
+      },
     ]);
     // `Node / Http2Session` (C++) -> Http2Session (JS)
     state.validateSnapshotNodes('Node / Http2Session', [
       {
         children: [
-          { node_name: 'Http2Session', edge_name: 'wrapped' },
+          { node_name: 'Http2Session', edge_name: 'native_to_javascript' },
           { node_name: 'Node / nghttp2_memory', edge_name: 'nghttp2_memory' },
           {
-            node_name: 'Node / streams', edge_name: 'streams'
-          }
+            node_name: 'Node / streams', edge_name: 'streams',
+          },
           // outstanding_pings, outgoing_buffers, outgoing_storage,
           // pending_rst_streams could be empty
-        ]
-      }
+        ],
+      },
     ], { loose: true });
   }));
 

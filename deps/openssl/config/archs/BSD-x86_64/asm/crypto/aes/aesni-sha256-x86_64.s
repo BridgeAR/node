@@ -5,7 +5,7 @@
 .type	aesni_cbc_sha256_enc,@function
 .align	16
 aesni_cbc_sha256_enc:
-.cfi_startproc
+.cfi_startproc	
 	leaq	OPENSSL_ia32cap_P(%rip),%r11
 	movl	$1,%eax
 	cmpq	$0,%rdi
@@ -31,7 +31,7 @@ aesni_cbc_sha256_enc:
 	ud2
 .Lprobe:
 	.byte	0xf3,0xc3
-.cfi_endproc
+.cfi_endproc	
 .size	aesni_cbc_sha256_enc,.-aesni_cbc_sha256_enc
 
 .align	64
@@ -4081,7 +4081,7 @@ aesni_cbc_sha256_enc_avx2:
 .type	aesni_cbc_sha256_enc_shaext,@function
 .align	32
 aesni_cbc_sha256_enc_shaext:
-.cfi_startproc
+.cfi_startproc	
 	movq	8(%rsp),%r10
 	leaq	K256+128(%rip),%rax
 	movdqu	(%r9),%xmm1
@@ -4431,5 +4431,26 @@ aesni_cbc_sha256_enc_shaext:
 	movdqu	%xmm1,(%r9)
 	movdqu	%xmm2,16(%r9)
 	.byte	0xf3,0xc3
-.cfi_endproc
+.cfi_endproc	
 .size	aesni_cbc_sha256_enc_shaext,.-aesni_cbc_sha256_enc_shaext
+	.section ".note.gnu.property", "a"
+	.p2align 3
+	.long 1f - 0f
+	.long 4f - 1f
+	.long 5
+0:
+	# "GNU" encoded with .byte, since .asciz isn't supported
+	# on Solaris.
+	.byte 0x47
+	.byte 0x4e
+	.byte 0x55
+	.byte 0
+1:
+	.p2align 3
+	.long 0xc0000002
+	.long 3f - 2f
+2:
+	.long 3
+3:
+	.p2align 3
+4:

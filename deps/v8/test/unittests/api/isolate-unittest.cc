@@ -2,17 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "testing/gtest/include/gtest/gtest.h"
+#include "src/execution/isolate.h"
 
 #include "include/libplatform/libplatform.h"
 #include "include/v8-platform.h"
-#include "include/v8.h"
-#include "src/base/macros.h"
+#include "include/v8-template.h"
 #include "src/base/platform/semaphore.h"
-#include "src/execution/execution.h"
-#include "src/execution/isolate.h"
 #include "src/init/v8.h"
 #include "test/unittests/test-utils.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace v8 {
 
@@ -25,6 +23,8 @@ class MemoryPressureTask : public v8::Task {
   MemoryPressureTask(Isolate* isolate, base::Semaphore* semaphore)
       : isolate_(isolate), semaphore_(semaphore) {}
   ~MemoryPressureTask() override = default;
+  MemoryPressureTask(const MemoryPressureTask&) = delete;
+  MemoryPressureTask& operator=(const MemoryPressureTask&) = delete;
 
   // v8::Task implementation.
   void Run() override {
@@ -35,8 +35,6 @@ class MemoryPressureTask : public v8::Task {
  private:
   Isolate* isolate_;
   base::Semaphore* semaphore_;
-
-  DISALLOW_COPY_AND_ASSIGN(MemoryPressureTask);
 };
 
 }  // namespace
@@ -94,7 +92,7 @@ TEST_F(IncumbentContextTest, Basic) {
         info.GetReturnValue().Set(incumbent_context->Global());
       });
   Local<ObjectTemplate> global_template = ObjectTemplate::New(isolate());
-  global_template->Set(Str("getIncumbentGlobal"), get_incumbent_global);
+  global_template->Set(isolate(), "getIncumbentGlobal", get_incumbent_global);
 
   Local<Context> context_a = Context::New(isolate(), nullptr, global_template);
   Local<Context> context_b = Context::New(isolate(), nullptr, global_template);
@@ -133,6 +131,37 @@ TEST_F(IncumbentContextTest, Basic) {
     Context::BackupIncumbentScope backup_incumbent(context_a);
     EXPECT_EQ(global_c, Run(context_a, "funcA()"));
   }
+}
+
+namespace {
+thread_local std::multimap<v8::CrashKeyId, std::string> crash_keys;
+void CrashKeyCallback(v8::CrashKeyId id, const std::string& value) {
+  crash_keys.insert({id, value});
+}
+}  // namespace
+TEST_F(IsolateTest, SetAddCrashKeyCallback) {
+  isolate()->SetAddCrashKeyCallback(CrashKeyCallback);
+
+  i::Isolate* i_isolate = reinterpret_cast<internal::Isolate*>(isolate());
+  i::Heap* heap = i_isolate->heap();
+
+  size_t expected_keys_count = 5;
+  EXPECT_EQ(crash_keys.count(v8::CrashKeyId::kIsolateAddress), 1u);
+  EXPECT_EQ(crash_keys.count(v8::CrashKeyId::kReadonlySpaceFirstPageAddress),
+            1u);
+  EXPECT_EQ(crash_keys.count(v8::CrashKeyId::kOldSpaceFirstPageAddress), 1u);
+  EXPECT_EQ(crash_keys.count(v8::CrashKeyId::kSnapshotChecksumCalculated), 1u);
+  EXPECT_EQ(crash_keys.count(v8::CrashKeyId::kSnapshotChecksumExpected), 1u);
+
+  if (heap->code_range_base()) {
+    ++expected_keys_count;
+    EXPECT_EQ(crash_keys.count(v8::CrashKeyId::kCodeRangeBaseAddress), 1u);
+  }
+  if (heap->code_space()->first_page()) {
+    ++expected_keys_count;
+    EXPECT_EQ(crash_keys.count(v8::CrashKeyId::kCodeSpaceFirstPageAddress), 1u);
+  }
+  EXPECT_EQ(crash_keys.size(), expected_keys_count);
 }
 
 }  // namespace v8

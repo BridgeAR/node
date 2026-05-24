@@ -15,6 +15,8 @@
 namespace v8 {
 namespace internal {
 
+#include "torque-generated/src/objects/literal-objects-tq-inl.inc"
+
 //
 // ObjectBoilerplateDescription
 //
@@ -26,31 +28,31 @@ CAST_ACCESSOR(ObjectBoilerplateDescription)
 SMI_ACCESSORS(ObjectBoilerplateDescription, flags,
               FixedArray::OffsetOfElementAt(kLiteralTypeOffset))
 
-Object ObjectBoilerplateDescription::name(int index) const {
-  const Isolate* isolate = GetIsolateForPtrCompr(*this);
-  return name(isolate, index);
+Tagged<Object> ObjectBoilerplateDescription::name(int index) const {
+  PtrComprCageBase cage_base = GetPtrComprCageBase(*this);
+  return name(cage_base, index);
 }
 
-Object ObjectBoilerplateDescription::name(const Isolate* isolate,
-                                          int index) const {
+Tagged<Object> ObjectBoilerplateDescription::name(PtrComprCageBase cage_base,
+                                                  int index) const {
   // get() already checks for out of bounds access, but we do not want to allow
   // access to the last element, if it is the number of properties.
   DCHECK_NE(size(), index);
-  return get(isolate, 2 * index + kDescriptionStartIndex);
+  return get(cage_base, 2 * index + kDescriptionStartIndex);
 }
 
-Object ObjectBoilerplateDescription::value(int index) const {
-  const Isolate* isolate = GetIsolateForPtrCompr(*this);
-  return value(isolate, index);
+Tagged<Object> ObjectBoilerplateDescription::value(int index) const {
+  PtrComprCageBase cage_base = GetPtrComprCageBase(*this);
+  return value(cage_base, index);
 }
 
-Object ObjectBoilerplateDescription::value(const Isolate* isolate,
-                                           int index) const {
-  return get(isolate, 2 * index + 1 + kDescriptionStartIndex);
+Tagged<Object> ObjectBoilerplateDescription::value(PtrComprCageBase cage_base,
+                                                   int index) const {
+  return get(cage_base, 2 * index + 1 + kDescriptionStartIndex);
 }
 
-void ObjectBoilerplateDescription::set_key_value(int index, Object key,
-                                                 Object value) {
+void ObjectBoilerplateDescription::set_key_value(int index, Tagged<Object> key,
+                                                 Tagged<Object> value) {
   DCHECK_LT(index, size());
   DCHECK_GE(index, 0);
   set(2 * index + kDescriptionStartIndex, key);
@@ -95,31 +97,25 @@ void ObjectBoilerplateDescription::set_backing_store_size(
 OBJECT_CONSTRUCTORS_IMPL(ClassBoilerplate, FixedArray)
 CAST_ACCESSOR(ClassBoilerplate)
 
-BIT_FIELD_ACCESSORS(ClassBoilerplate, flags, install_class_name_accessor,
-                    ClassBoilerplate::Flags::InstallClassNameAccessorBit)
+SMI_ACCESSORS(ClassBoilerplate, arguments_count,
+              FixedArray::OffsetOfElementAt(kArgumentsCountIndex))
 
-BIT_FIELD_ACCESSORS(ClassBoilerplate, flags, arguments_count,
-                    ClassBoilerplate::Flags::ArgumentsCountBits)
-
-SMI_ACCESSORS(ClassBoilerplate, flags,
-              FixedArray::OffsetOfElementAt(kFlagsIndex))
-
-ACCESSORS(ClassBoilerplate, static_properties_template, Object,
+ACCESSORS(ClassBoilerplate, static_properties_template, Tagged<Object>,
           FixedArray::OffsetOfElementAt(kClassPropertiesTemplateIndex))
 
-ACCESSORS(ClassBoilerplate, static_elements_template, Object,
+ACCESSORS(ClassBoilerplate, static_elements_template, Tagged<Object>,
           FixedArray::OffsetOfElementAt(kClassElementsTemplateIndex))
 
-ACCESSORS(ClassBoilerplate, static_computed_properties, FixedArray,
+ACCESSORS(ClassBoilerplate, static_computed_properties, Tagged<FixedArray>,
           FixedArray::OffsetOfElementAt(kClassComputedPropertiesIndex))
 
-ACCESSORS(ClassBoilerplate, instance_properties_template, Object,
+ACCESSORS(ClassBoilerplate, instance_properties_template, Tagged<Object>,
           FixedArray::OffsetOfElementAt(kPrototypePropertiesTemplateIndex))
 
-ACCESSORS(ClassBoilerplate, instance_elements_template, Object,
+ACCESSORS(ClassBoilerplate, instance_elements_template, Tagged<Object>,
           FixedArray::OffsetOfElementAt(kPrototypeElementsTemplateIndex))
 
-ACCESSORS(ClassBoilerplate, instance_computed_properties, FixedArray,
+ACCESSORS(ClassBoilerplate, instance_computed_properties, Tagged<FixedArray>,
           FixedArray::OffsetOfElementAt(kPrototypeComputedPropertiesIndex))
 
 //
@@ -137,8 +133,14 @@ void ArrayBoilerplateDescription::set_elements_kind(ElementsKind kind) {
 }
 
 bool ArrayBoilerplateDescription::is_empty() const {
-  return constant_elements().length() == 0;
+  return constant_elements()->length() == 0;
 }
+
+//
+// RegExpBoilerplateDescription
+//
+
+TQ_OBJECT_CONSTRUCTORS_IMPL(RegExpBoilerplateDescription)
 
 }  // namespace internal
 }  // namespace v8

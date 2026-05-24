@@ -2,28 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --harmony-dynamic-import
+// Flags: --allow-natives-syntax
 
 var ran = false;
 
 var x = {
   get toString() { return undefined; }
 };
-import(x);
+import(x).then(assertUnreachable, 
+    (e) => assertInstanceof(e, TypeError));
 
 var x = {
   toString() {
     throw new Error('42 is the answer');
   }
 };
-import(x);
+import(x).then(assertUnreachable, 
+    (e) => assertEquals(e.message, '42 is the answer'))
 
 var x = {
   get toString() {
     throw new Error('42 is the answer');
   }
 };
-import(x);
+import(x).then(assertUnreachable,
+    (e) => assertEquals(e.message, '42 is the answer'))
 
 async function test1() {
   try {

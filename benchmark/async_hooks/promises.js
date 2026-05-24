@@ -6,20 +6,25 @@ let hook;
 const tests = {
   disabled() {
     hook = createHook({
-      promiseResolve() {}
+      promiseResolve() {},
     });
   },
   enabled() {
     hook = createHook({
-      promiseResolve() {}
+      promiseResolve() {},
     }).enable();
   },
   enabledWithDestroy() {
     hook = createHook({
       promiseResolve() {},
-      destroy() {}
+      destroy() {},
     }).enable();
-  }
+  },
+  enabledWithInitOnly() {
+    hook = createHook({
+      init() {},
+    }).enable();
+  },
 };
 
 const bench = common.createBenchmark(main, {
@@ -27,14 +32,16 @@ const bench = common.createBenchmark(main, {
   asyncHooks: [
     'enabled',
     'enabledWithDestroy',
+    'enabledWithInitOnly',
     'disabled',
-  ]
+  ],
 });
 
+const err = new Error('foobar');
 async function run(n) {
   for (let i = 0; i < n; i++) {
     await new Promise((resolve) => resolve())
-      .then(() => { throw new Error('foobar'); })
+      .then(() => { throw err; })
       .catch((e) => e);
   }
 }

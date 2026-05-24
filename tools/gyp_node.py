@@ -21,16 +21,12 @@ def run_gyp(args):
   args.append(os.path.join(a_path, 'node.gyp'))
   common_fn = os.path.join(a_path, 'common.gypi')
   options_fn = os.path.join(a_path, 'config.gypi')
-  options_fips_fn = os.path.join(a_path, 'config_fips.gypi')
 
   if os.path.exists(common_fn):
     args.extend(['-I', common_fn])
 
   if os.path.exists(options_fn):
     args.extend(['-I', options_fn])
-
-  if os.path.exists(options_fips_fn):
-    args.extend(['-I', options_fips_fn])
 
   args.append('--depth=' + node_root)
 
@@ -44,12 +40,6 @@ def run_gyp(args):
 
   args.append('-Dcomponent=static_library')
   args.append('-Dlibrary=static_library')
-
-  # Don't compile with -B and -fuse-ld=, we don't bundle ld.gold.  Can't be
-  # set in common.gypi due to how deps/v8/build/toolchain.gypi uses them.
-  args.append('-Dlinux_use_bundled_binutils=0')
-  args.append('-Dlinux_use_bundled_gold=0')
-  args.append('-Dlinux_use_gold_flags=0')
 
   rc = gyp.main(args)
   if rc != 0:

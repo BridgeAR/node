@@ -5,10 +5,8 @@
 #ifndef V8_SNAPSHOT_SNAPSHOT_COMPRESSION_H_
 #define V8_SNAPSHOT_SNAPSHOT_COMPRESSION_H_
 
-#include "src/snapshot/serializer-common.h"
-#include "src/snapshot/serializer.h"
-#include "src/snapshot/snapshot.h"
-#include "src/utils/vector.h"
+#include "src/base/vector.h"
+#include "src/snapshot/snapshot-data.h"
 
 namespace v8 {
 namespace internal {
@@ -18,7 +16,7 @@ class SnapshotCompression : public AllStatic {
   V8_EXPORT_PRIVATE static SnapshotData Compress(
       const SnapshotData* uncompressed_data);
   V8_EXPORT_PRIVATE static SnapshotData Decompress(
-      Vector<const byte> compressed_data);
+      base::Vector<const uint8_t> compressed_data);
 };
 
 }  // namespace internal

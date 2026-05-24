@@ -4,7 +4,8 @@ const common = require('../common.js');
 const { MessageChannel } = require('worker_threads');
 const bench = common.createBenchmark(main, {
   payload: ['string', 'object'],
-  n: [1e6]
+  style: ['eventtarget', 'eventemitter'],
+  n: [1e6],
 });
 
 function main(conf) {
@@ -25,14 +26,26 @@ function main(conf) {
   const { port1, port2 } = new MessageChannel();
 
   let messages = 0;
-  port2.onmessage = () => {
+  function listener() {
     if (messages++ === n) {
       bench.end(n);
       port1.close();
     } else {
       write();
     }
-  };
+  }
+
+  switch (conf.style) {
+    case 'eventtarget':
+      port2.onmessage = listener;
+      break;
+    case 'eventemitter':
+      port2.on('message', listener);
+      break;
+    default:
+      throw new Error('Unsupported listener type');
+  }
+
   bench.start();
   write();
 

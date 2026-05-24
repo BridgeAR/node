@@ -5,7 +5,9 @@
 #ifndef V8_REGEXP_REGEXP_BYTECODES_H_
 #define V8_REGEXP_REGEXP_BYTECODES_H_
 
+#include "src/base/bounds.h"
 #include "src/base/macros.h"
+#include "src/base/strings.h"
 #include "src/common/globals.h"
 
 namespace v8 {
@@ -23,10 +25,12 @@ constexpr int BYTECODE_MASK = kRegExpPaddedBytecodeCount - 1;
 // positive values.
 const unsigned int MAX_FIRST_ARG = 0x7fffffu;
 const int BYTECODE_SHIFT = 8;
-STATIC_ASSERT(1 << BYTECODE_SHIFT > BYTECODE_MASK);
+static_assert(1 << BYTECODE_SHIFT > BYTECODE_MASK);
 
+// The list of bytecodes, in format: V(Name, Code, ByteLength).
 // TODO(pthier): Argument offsets of bytecodes should be easily accessible by
 // name or at least by position.
+// TODO(jgruber): More precise types (e.g. int32/uint32 instead of value32).
 #define BYTECODE_ITERATOR(V)                                                   \
   V(BREAK, 0, 4)              /* bc8                                        */ \
   V(PUSH_CP, 1, 4)            /* bc8 pad24                                  */ \
@@ -85,12 +89,14 @@ STATIC_ASSERT(1 << BYTECODE_SHIFT > BYTECODE_MASK);
   /* 0x10 - 0x1F:   Character to match against (after mask aplied)          */ \
   /* 0x20 - 0x3F:   Bitmask bitwise and combined with current character     */ \
   /* 0x40 - 0x5F:   Address of bytecode when matched                        */ \
-  V(AND_CHECK_CHAR, 28, 12)           /* bc8 pad8 uint16 uint32 addr32      */ \
-  V(AND_CHECK_NOT_4_CHARS, 29, 16)    /* bc8 pad24 uint32 uint32 addr32 */     \
-  V(AND_CHECK_NOT_CHAR, 30, 12)       /* bc8 pad8 uint16 uint32 addr32 */      \
-  V(MINUS_AND_CHECK_NOT_CHAR, 31, 12) /* bc8 pad8 uc16 uc16 uc16 addr32 */     \
-  V(CHECK_CHAR_IN_RANGE, 32, 12)      /* bc8 pad24 uc16 uc16 addr32 */         \
-  V(CHECK_CHAR_NOT_IN_RANGE, 33, 12)  /* bc8 pad24 uc16 uc16 addr32 */         \
+  V(AND_CHECK_CHAR, 28, 12)        /* bc8 pad8 uint16 uint32 addr32      */    \
+  V(AND_CHECK_NOT_4_CHARS, 29, 16) /* bc8 pad24 uint32 uint32 addr32 */        \
+  V(AND_CHECK_NOT_CHAR, 30, 12)    /* bc8 pad8 uint16 uint32 addr32 */         \
+  V(MINUS_AND_CHECK_NOT_CHAR, 31,                                              \
+    12) /* bc8 pad8 base::uc16 base::uc16 base::uc16 addr32 */                 \
+  V(CHECK_CHAR_IN_RANGE, 32, 12) /* bc8 pad24 base::uc16 base::uc16 addr32 */  \
+  V(CHECK_CHAR_NOT_IN_RANGE, 33,                                               \
+    12) /* bc8 pad24 base::uc16 base::uc16 addr32 */                           \
   /* Checks if the current character matches any of the characters encoded  */ \
   /* in a bit table. Similar to/inspired by boyer moore string search       */ \
   /* Bit Layout:                                                            */ \
@@ -99,14 +105,14 @@ STATIC_ASSERT(1 << BYTECODE_SHIFT > BYTECODE_MASK);
   /* 0x20 - 0x3F:   Address of bytecode when bit is set                     */ \
   /* 0x40 - 0xBF:   Bit table                                               */ \
   V(CHECK_BIT_IN_TABLE, 34, 24) /* bc8 pad24 addr32 bits128           */       \
-  V(CHECK_LT, 35, 8) /* bc8 pad8 uc16 addr32                       */          \
-  V(CHECK_GT, 36, 8) /* bc8 pad8 uc16 addr32                       */          \
-  V(CHECK_NOT_BACK_REF, 37, 8)                  /* bc8 reg_idx24 addr32 */     \
-  V(CHECK_NOT_BACK_REF_NO_CASE, 38, 8)          /* bc8 reg_idx24 addr32 */     \
-  V(CHECK_NOT_BACK_REF_NO_CASE_UNICODE, 39, 8)  /* UNUSED */                   \
+  V(CHECK_LT, 35, 8) /* bc8 pad8 base::uc16 addr32                       */    \
+  V(CHECK_GT, 36, 8) /* bc8 pad8 base::uc16 addr32                       */    \
+  V(CHECK_NOT_BACK_REF, 37, 8)         /* bc8 reg_idx24 addr32 */              \
+  V(CHECK_NOT_BACK_REF_NO_CASE, 38, 8) /* bc8 reg_idx24 addr32 */              \
+  V(CHECK_NOT_BACK_REF_NO_CASE_UNICODE, 39, 8)                                 \
   V(CHECK_NOT_BACK_REF_BACKWARD, 40, 8)         /* bc8 reg_idx24 addr32 */     \
   V(CHECK_NOT_BACK_REF_NO_CASE_BACKWARD, 41, 8) /* bc8 reg_idx24 addr32 */     \
-  V(CHECK_NOT_BACK_REF_NO_CASE_UNICODE_BACKWARD, 42, 8) /* UNUSED */           \
+  V(CHECK_NOT_BACK_REF_NO_CASE_UNICODE_BACKWARD, 42, 8)                        \
   V(CHECK_NOT_REGS_EQUAL, 43, 12) /* bc8 regidx24 reg_idx32 addr32 */          \
   V(CHECK_REGISTER_LT, 44, 12)    /* bc8 reg_idx24 value32 addr32 */           \
   V(CHECK_REGISTER_GE, 45, 12)    /* bc8 reg_idx24 value32 addr32 */           \
@@ -215,7 +221,7 @@ static constexpr int kRegExpBytecodeCount = BYTECODE_ITERATOR(COUNT);
 // contiguous, strictly increasing, and start at 0.
 // TODO(jgruber): Do not explicitly assign values, instead generate them
 // implicitly from the list order.
-STATIC_ASSERT(kRegExpBytecodeCount == 59);
+static_assert(kRegExpBytecodeCount == 59);
 
 #define DECLARE_BYTECODES(name, code, length) \
   static constexpr int BC_##name = code;
@@ -229,21 +235,24 @@ static constexpr int kRegExpBytecodeLengths[] = {
 };
 
 inline constexpr int RegExpBytecodeLength(int bytecode) {
+  DCHECK(base::IsInRange(bytecode, 0, kRegExpBytecodeCount - 1));
   return kRegExpBytecodeLengths[bytecode];
 }
 
-static const char* const kRegExpBytecodeNames[] = {
+static constexpr const char* const kRegExpBytecodeNames[] = {
 #define DECLARE_BYTECODE_NAME(name, ...) #name,
     BYTECODE_ITERATOR(DECLARE_BYTECODE_NAME)
 #undef DECLARE_BYTECODE_NAME
 };
 
-inline const char* RegExpBytecodeName(int bytecode) {
+inline constexpr const char* RegExpBytecodeName(int bytecode) {
+  DCHECK(base::IsInRange(bytecode, 0, kRegExpBytecodeCount - 1));
   return kRegExpBytecodeNames[bytecode];
 }
 
-void RegExpBytecodeDisassembleSingle(const byte* code_base, const byte* pc);
-void RegExpBytecodeDisassemble(const byte* code_base, int length,
+void RegExpBytecodeDisassembleSingle(const uint8_t* code_base,
+                                     const uint8_t* pc);
+void RegExpBytecodeDisassemble(const uint8_t* code_base, int length,
                                const char* pattern);
 
 }  // namespace internal

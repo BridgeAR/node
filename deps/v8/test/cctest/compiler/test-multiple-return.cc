@@ -21,7 +21,7 @@
 #include "src/wasm/wasm-opcodes.h"
 #include "test/cctest/cctest.h"
 #include "test/cctest/compiler/codegen-tester.h"
-#include "test/cctest/compiler/value-helper.h"
+#include "test/common/value-helper.h"
 
 namespace v8 {
 namespace internal {
@@ -110,7 +110,7 @@ Node* ToInt32(RawMachineAssembler* m, MachineType type, Node* a) {
     case MachineRepresentation::kWord64:
       return m->TruncateInt64ToInt32(a);
     case MachineRepresentation::kFloat32:
-      return m->TruncateFloat32ToInt32(a);
+      return m->TruncateFloat32ToInt32(a, TruncateKind::kArchitectureDefault);
     case MachineRepresentation::kFloat64:
       return m->RoundFloat64ToInt32(a);
     default:
@@ -120,33 +120,31 @@ Node* ToInt32(RawMachineAssembler* m, MachineType type, Node* a) {
 
 std::shared_ptr<wasm::NativeModule> AllocateNativeModule(Isolate* isolate,
                                                          size_t code_size) {
-  std::shared_ptr<wasm::WasmModule> module(new wasm::WasmModule());
+  auto module = std::make_shared<wasm::WasmModule>(wasm::kWasmOrigin);
   module->num_declared_functions = 1;
   // We have to add the code object to a NativeModule, because the
   // WasmCallDescriptor assumes that code is on the native heap and not
   // within a code object.
-  auto native_module = isolate->wasm_engine()->NewNativeModule(
+  auto native_module = wasm::GetWasmEngine()->NewNativeModule(
       isolate, wasm::WasmFeatures::All(), std::move(module), code_size);
   native_module->SetWireBytes({});
   return native_module;
 }
 
-void TestReturnMultipleValues(MachineType type) {
-  const int kMaxCount = 20;
-  const int kMaxParamCount = 9;
-  // Use 9 parameters as a regression test or https://crbug.com/838098.
-  for (int param_count : {2, kMaxParamCount}) {
-    for (int count = 0; count < kMaxCount; ++count) {
-      printf("\n==== type = %s, count = %d ====\n\n\n",
-             MachineReprToString(type.representation()), count);
+template <int kMinParamCount, int kMaxParamCount>
+void TestReturnMultipleValues(MachineType type, int min_count, int max_count) {
+  for (int param_count : {kMinParamCount, kMaxParamCount}) {
+    for (int count = min_count; count < max_count; ++count) {
+      printf("\n==== type = %s, parameter_count = %d, count = %d ====\n\n\n",
+             MachineReprToString(type.representation()), param_count, count);
       v8::internal::AccountingAllocator allocator;
       Zone zone(&allocator, ZONE_NAME);
       CallDescriptor* desc =
           CreateCallDescriptor(&zone, count, param_count, type);
-      HandleAndZoneScope handles;
+      HandleAndZoneScope handles(kCompressGraphZone);
       RawMachineAssembler m(
           handles.main_isolate(),
-          new (handles.main_zone()) Graph(handles.main_zone()), desc,
+          handles.main_zone()->New<Graph>(handles.main_zone()), desc,
           MachineType::PointerRepresentation(),
           InstructionSelector::SupportedMachineOperatorFlags());
 
@@ -162,15 +160,16 @@ void TestReturnMultipleValues(MachineType type) {
       }
       m.Return(count, returns.get());
 
-      OptimizedCompilationInfo info(ArrayVector("testing"), handles.main_zone(),
-                                    Code::WASM_FUNCTION);
+      OptimizedCompilationInfo info(base::ArrayVector("testing"),
+                                    handles.main_zone(),
+                                    CodeKind::WASM_FUNCTION);
       Handle<Code> code = Pipeline::GenerateCodeForTesting(
                               &info, handles.main_isolate(), desc, m.graph(),
                               AssemblerOptions::Default(handles.main_isolate()),
                               m.ExportForTest())
                               .ToHandleChecked();
 #ifdef ENABLE_DISASSEMBLER
-      if (FLAG_print_code) {
+      if (v8_flags.print_code) {
         StdoutStream os;
         code->Disassemble("multi_value", os, handles.main_isolate());
       }
@@ -186,12 +185,12 @@ void TestReturnMultipleValues(MachineType type) {
       }
 
       std::shared_ptr<wasm::NativeModule> module = AllocateNativeModule(
-          handles.main_isolate(), code->raw_instruction_size());
+          handles.main_isolate(), code->instruction_size());
       wasm::WasmCodeRefScope wasm_code_ref_scope;
-      byte* code_start =
+      uint8_t* code_start =
           module->AddCodeForTesting(code)->instructions().begin();
 
-      RawMachineAssemblerTester<int32_t> mt(Code::Kind::JS_TO_WASM_FUNCTION);
+      RawMachineAssemblerTester<int32_t> mt(CodeKind::JS_TO_WASM_FUNCTION);
       const int input_count = 2 + param_count;
       Node* call_inputs[2 + kMaxParamCount];
       call_inputs[0] = mt.PointerConstant(code_start);
@@ -217,9 +216,9 @@ void TestReturnMultipleValues(MachineType type) {
       }
       mt.Return(ToInt32(&mt, type, ret));
 #ifdef ENABLE_DISASSEMBLER
-      Handle<Code> code2 = mt.GetCode();
-      if (FLAG_print_code) {
+      if (v8_flags.print_code) {
         StdoutStream os;
+        Handle<Code> code2 = mt.GetCode();
         code2->Disassemble("multi_value_call", os, handles.main_isolate());
       }
 #endif
@@ -230,8 +229,15 @@ void TestReturnMultipleValues(MachineType type) {
 
 }  // namespace
 
+// Use 9 parameters as a regression test or https://crbug.com/838098.
 #define TEST_MULTI(Type, type) \
-  TEST(ReturnMultiple##Type) { TestReturnMultipleValues(type); }
+  TEST(ReturnMultiple##Type) { TestReturnMultipleValues<2, 9>(type, 0, 20); }
+
+// Create a frame larger than UINT16_MAX to force TF to use an extra register
+// when popping the frame.
+TEST(TestReturnMultipleValuesLargeFrame) {
+  TestReturnMultipleValues<20000, 20000>(MachineType::Int32(), 2, 3);
+}
 
 TEST_MULTI(Int32, MachineType::Int32())
 #if (!V8_TARGET_ARCH_32_BIT)
@@ -253,9 +259,9 @@ void ReturnLastValue(MachineType type) {
 
     CallDescriptor* desc = CreateCallDescriptor(&zone, return_count, 0, type);
 
-    HandleAndZoneScope handles;
+    HandleAndZoneScope handles(kCompressGraphZone);
     RawMachineAssembler m(handles.main_isolate(),
-                          new (handles.main_zone()) Graph(handles.main_zone()),
+                          handles.main_zone()->New<Graph>(handles.main_zone()),
                           desc, MachineType::PointerRepresentation(),
                           InstructionSelector::SupportedMachineOperatorFlags());
 
@@ -267,18 +273,19 @@ void ReturnLastValue(MachineType type) {
 
     m.Return(return_count, returns.get());
 
-    OptimizedCompilationInfo info(ArrayVector("testing"), handles.main_zone(),
-                                  Code::WASM_FUNCTION);
+    OptimizedCompilationInfo info(base::ArrayVector("testing"),
+                                  handles.main_zone(), CodeKind::WASM_FUNCTION);
     Handle<Code> code = Pipeline::GenerateCodeForTesting(
                             &info, handles.main_isolate(), desc, m.graph(),
                             AssemblerOptions::Default(handles.main_isolate()),
                             m.ExportForTest())
                             .ToHandleChecked();
 
-    std::shared_ptr<wasm::NativeModule> module = AllocateNativeModule(
-        handles.main_isolate(), code->raw_instruction_size());
+    std::shared_ptr<wasm::NativeModule> module =
+        AllocateNativeModule(handles.main_isolate(), code->instruction_size());
     wasm::WasmCodeRefScope wasm_code_ref_scope;
-    byte* code_start = module->AddCodeForTesting(code)->instructions().begin();
+    uint8_t* code_start =
+        module->AddCodeForTesting(code)->instructions().begin();
 
     // Generate caller.
     int expect = return_count - 1;
@@ -316,9 +323,9 @@ void ReturnSumOfReturns(MachineType type) {
 
     CallDescriptor* desc = CreateCallDescriptor(&zone, return_count, 0, type);
 
-    HandleAndZoneScope handles;
+    HandleAndZoneScope handles(kCompressGraphZone);
     RawMachineAssembler m(handles.main_isolate(),
-                          new (handles.main_zone()) Graph(handles.main_zone()),
+                          handles.main_zone()->New<Graph>(handles.main_zone()),
                           desc, MachineType::PointerRepresentation(),
                           InstructionSelector::SupportedMachineOperatorFlags());
 
@@ -330,18 +337,19 @@ void ReturnSumOfReturns(MachineType type) {
 
     m.Return(return_count, returns.get());
 
-    OptimizedCompilationInfo info(ArrayVector("testing"), handles.main_zone(),
-                                  Code::WASM_FUNCTION);
+    OptimizedCompilationInfo info(base::ArrayVector("testing"),
+                                  handles.main_zone(), CodeKind::WASM_FUNCTION);
     Handle<Code> code = Pipeline::GenerateCodeForTesting(
                             &info, handles.main_isolate(), desc, m.graph(),
                             AssemblerOptions::Default(handles.main_isolate()),
                             m.ExportForTest())
                             .ToHandleChecked();
 
-    std::shared_ptr<wasm::NativeModule> module = AllocateNativeModule(
-        handles.main_isolate(), code->raw_instruction_size());
+    std::shared_ptr<wasm::NativeModule> module =
+        AllocateNativeModule(handles.main_isolate(), code->instruction_size());
     wasm::WasmCodeRefScope wasm_code_ref_scope;
-    byte* code_start = module->AddCodeForTesting(code)->instructions().begin();
+    uint8_t* code_start =
+        module->AddCodeForTesting(code)->instructions().begin();
 
     // Generate caller.
     RawMachineAssemblerTester<int32_t> mt;

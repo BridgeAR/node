@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 const num_functions = 200;
 
-// Create a simple Wasm script.
+// Create a simple Wasm module.
 function create_builder(delta = 0) {
   const builder = new WasmModuleBuilder();
   for (let i = 0; i < num_functions; ++i) {
@@ -17,19 +17,21 @@ function create_builder(delta = 0) {
   return builder;
 }
 
-function checkTieredDown(instance) {
+function checkDebugCode(instance) {
   for (let i = 0; i < num_functions; ++i) {
-    assertTrue(%IsLiftoffFunction(instance.exports['f' + i]));
+    // Call the function once because of lazy compilation.
+    instance.exports['f' + i]();
+    assertTrue(%IsWasmDebugFunction(instance.exports['f' + i]));
   }
 }
 
-function checkTieredUp(instance) {
-  // Busy waiting until all functions are tiered up.
+function waitForNoDebugCode(instance) {
+  // Busy waiting until all functions left debug mode.
   let num_liftoff_functions = 0;
   while (true) {
     num_liftoff_functions = 0;
     for (let i = 0; i < num_functions; ++i) {
-      if (%IsLiftoffFunction(instance.exports['f' + i])) {
+      if (%IsWasmDebugFunction(instance.exports['f' + i])) {
         num_liftoff_functions++;
       }
     }
@@ -37,26 +39,39 @@ function checkTieredUp(instance) {
   }
 }
 
-const instance = create_builder().instantiate();
 const Debug = new DebugWrapper();
-Debug.enable();
-checkTieredDown(instance);
-const newInstance = create_builder(num_functions*2).instantiate();
-checkTieredDown(newInstance);
-Debug.disable();
-checkTieredUp(instance);
-checkTieredUp(newInstance);
 
-// Async.
-async function testTierDownToLiftoffAsync() {
-  const asyncInstance = await create_builder(num_functions).asyncInstantiate();
+(function testEnterDebugMode() {
+  // In the 'isolates' test, this test runs in parallel to itself on two
+  // isolates. All checks below should still hold.
+  const instance = create_builder(0).instantiate();
   Debug.enable();
-  checkTieredDown(asyncInstance);
-  const newAsyncInstance = await create_builder(num_functions*3).asyncInstantiate();
-  checkTieredDown(newAsyncInstance);
+  checkDebugCode(instance);
+  const instance2 = create_builder(1).instantiate();
+  checkDebugCode(instance2);
   Debug.disable();
-  checkTieredUp(asyncInstance);
-  checkTieredUp(newAsyncInstance);
-}
+  // Eventually the instances will have completely left debug mode again.
+  waitForNoDebugCode(instance);
+  waitForNoDebugCode(instance2);
+})();
 
-assertPromiseResult(testTierDownToLiftoffAsync());
+// Test async compilation.
+assertPromiseResult((async function testEnterDebugModeAsync() {
+  // First test: enable the debugger *after* compiling the module.
+  const instance = await create_builder(2).asyncInstantiate();
+  Debug.enable();
+  checkDebugCode(instance);
+  const instance2 = await create_builder(3).asyncInstantiate();
+  checkDebugCode(instance2);
+  Debug.disable();
+  waitForNoDebugCode(instance);
+  waitForNoDebugCode(instance2);
+
+  // Second test: enable the debugger *while* compiling the module.
+  const instancePromise = create_builder(4).asyncInstantiate();
+  Debug.enable();
+  const instance3 = await instancePromise;
+  checkDebugCode(instance3);
+  Debug.disable();
+  waitForNoDebugCode(instance3);
+})());

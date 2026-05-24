@@ -11,6 +11,7 @@ namespace v8 {
 namespace base {
 
 using Address = RegionAllocator::Address;
+using RegionState = RegionAllocator::RegionState;
 using v8::internal::KB;
 using v8::internal::MB;
 
@@ -75,6 +76,27 @@ TEST(RegionAllocatorTest, SimpleAllocateRegion) {
     CHECK_EQ(ra.AllocateRegion(kPageSize), address);
   }
   CHECK_EQ(ra.free_size(), 0);
+}
+
+TEST(RegionAllocatorTest, SimpleAllocateAlignedRegion) {
+  const size_t kPageSize = 4 * KB;
+  const size_t kPageCount = 16;
+  const size_t kSize = kPageSize * kPageCount;
+  const Address kBegin = static_cast<Address>(kPageSize * 153);
+
+  RegionAllocator ra(kBegin, kSize, kPageSize);
+
+  // Allocate regions with different alignments and verify that they are
+  // correctly aligned.
+  const size_t alignments[] = {kPageSize,     kPageSize * 8, kPageSize,
+                               kPageSize * 4, kPageSize * 2, kPageSize * 2,
+                               kPageSize * 4, kPageSize * 2};
+  for (auto alignment : alignments) {
+    Address address = ra.AllocateAlignedRegion(kPageSize, alignment);
+    CHECK_NE(address, RegionAllocator::kAllocationFailure);
+    CHECK(IsAligned(address, alignment));
+  }
+  CHECK_EQ(ra.free_size(), 8 * kPageSize);
 }
 
 TEST(RegionAllocatorTest, AllocateRegionRandom) {
@@ -348,6 +370,30 @@ TEST(RegionAllocatorTest, TrimRegion) {
   // Check that the whole region is free and can be fully allocated.
   CHECK_EQ(ra.free_size(), kSize);
   CHECK_EQ(ra.AllocateRegion(kSize), kBegin);
+}
+
+TEST(RegionAllocatorTest, AllocateExcluded) {
+  const size_t kPageSize = 4 * KB;
+  const size_t kPageCount = 64;
+  const size_t kSize = kPageSize * kPageCount;
+  const Address kBegin = static_cast<Address>(kPageSize * 153);
+
+  RegionAllocator ra(kBegin, kSize, kPageSize);
+
+  Address address = kBegin + 13 * kPageSize;
+  size_t size = 37 * kPageSize;
+  CHECK(ra.AllocateRegionAt(address, size, RegionState::kExcluded));
+
+  // The region is not free and cannot be allocated at again.
+  CHECK(!ra.IsFree(address, size));
+  CHECK(!ra.AllocateRegionAt(address, size));
+  auto region_iter = ra.FindRegion(address);
+
+  CHECK((*region_iter)->is_excluded());
+
+  // It's not possible to free or trim an excluded region.
+  CHECK_EQ(ra.FreeRegion(address), 0);
+  CHECK_EQ(ra.TrimRegion(address, kPageSize), 0);
 }
 
 }  // namespace base

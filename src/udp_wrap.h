@@ -144,12 +144,10 @@ class UDPWrap final : public HandleWrap,
       const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetMulticastInterface(
       const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void SetMulticastTTL(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void SetMulticastLoopback(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void SetBroadcast(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void SetTTL(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void BufferSize(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void GetSendQueueSize(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void GetSendQueueCount(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // UDPListener implementation
   uv_buf_t OnAlloc(size_t suggested_size) override;
@@ -171,6 +169,8 @@ class UDPWrap final : public HandleWrap,
   SocketAddress GetSockName() override;
 
   AsyncWrap* GetAsyncWrap() override;
+
+  inline uv_udp_t* GetLibuvHandle() { return &handle_; }
 
   static v8::MaybeLocal<v8::Object> Instantiate(Environment* env,
                                                 AsyncWrap* parent,
@@ -214,6 +214,11 @@ class UDPWrap final : public HandleWrap,
   bool current_send_has_callback_;
   v8::Local<v8::Object> current_send_req_wrap_;
 };
+
+int sockaddr_for_family(int address_family,
+                        const char* address,
+                        const unsigned short port,
+                        sockaddr_storage* addr);
 
 }  // namespace node
 

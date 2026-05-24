@@ -22,8 +22,7 @@
 'use strict';
 
 const common = require('../common');
-const W = require('_stream_writable');
-const D = require('_stream_duplex');
+const { Writable: W, Duplex: D } = require('stream');
 const assert = require('assert');
 
 class TestWriter extends W {
@@ -195,7 +194,8 @@ for (let i = 0; i < chunks.length; i++) {
 {
   // Verify write callbacks
   const callbacks = chunks.map(function(chunk, i) {
-    return [i, function() {
+    return [i, function(err) {
+      assert.strictEqual(err, null);
       callbacks._called[i] = chunk;
     }];
   }).reduce(function(set, x) {
@@ -226,7 +226,9 @@ for (let i = 0; i < chunks.length; i++) {
 {
   // Verify end() callback
   const tw = new TestWriter();
-  tw.end(common.mustCall());
+  tw.end(common.mustCall(function(err) {
+    assert.strictEqual(err, null);
+  }));
 }
 
 const helloWorldBuffer = Buffer.from('hello world');
@@ -234,7 +236,9 @@ const helloWorldBuffer = Buffer.from('hello world');
 {
   // Verify end() callback with chunk
   const tw = new TestWriter();
-  tw.end(helloWorldBuffer, common.mustCall());
+  tw.end(helloWorldBuffer, common.mustCall(function(err) {
+    assert.strictEqual(err, null);
+  }));
 }
 
 {

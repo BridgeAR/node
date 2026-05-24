@@ -59,7 +59,7 @@ function listener(event, exec_state, event_data, data) {
     success(1, "try { get_a() } catch (e) {}");
     // Call to C++ built-in.
     success(Math.sin(2), "Math.sin(2)");
-    // Call to whitelisted get accessors.
+    // Call to allowlisted get accessors.
     success(3, "'abc'.length");
     success(2, "array.length");
     success(1, "'x'.length");
@@ -93,7 +93,7 @@ function listener(event, exec_state, event_data, data) {
     fail("bound.name = 'bound'");
     fail("bound.length = 1");
     fail("set_a.prototype = null");
-    // Test that call to non-whitelisted get accessor fails.
+    // Test that call to non-allowlisted get accessor fails.
     fail("error.stack");
     // Call to set accessors with receiver check.
     success(1, "[].length = 1");
@@ -105,8 +105,8 @@ function listener(event, exec_state, event_data, data) {
     success("g", "get_a.bind(0).name = 'g'");
     success(1, "get_a.bind(0).length = 1");
     success(null, "(function(){}).prototype = null");
-    success(true, "(new Error()).stack.length > 1");
-    success("a", "(new Error()).stack = 'a'");
+    fail("(new Error()).stack.length > 1");
+    fail("(new Error()).stack = 'a'");
     // Eval is not allowed.
     fail("eval('Math.sin(1)')");
     fail("eval('exception = 1')");

@@ -108,15 +108,15 @@ const T_THRESHOLD = 3.892;
 const t = getTValue(crypto.timingSafeEqual);
 assert(
   Math.abs(t) < T_THRESHOLD,
-  `timingSafeEqual should not leak information from its execution time (t=${t})`
+  `timingSafeEqual should not leak information from its execution time (t=${t})`,
 );
 
-// As a sanity check to make sure the statistical tests are working, run the
+// As a coherence check to make sure the statistical tests are working, run the
 // same benchmarks again, this time with an unsafe comparison function. In this
 // case the t-value should be above the threshold.
 const unsafeCompare = (bufA, bufB) => bufA.equals(bufB);
 const t2 = getTValue(unsafeCompare);
 assert(
   Math.abs(t2) > T_THRESHOLD,
-  `Buffer#equals should leak information from its execution time (t=${t2})`
+  `Buffer#equals should leak information from its execution time (t=${t2})`,
 );

@@ -23,7 +23,6 @@
 const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
-const join = require('path').join;
 
 const tmpdir = require('../common/tmpdir');
 
@@ -43,13 +42,10 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 
 // Test that empty file will be created and have content added (callback API).
 {
-  const filename = join(tmpdir.path, 'append.txt');
+  const filename = tmpdir.resolve('append.txt');
 
-  fs.appendFile(filename, s, common.mustCall(function(e) {
-    assert.ifError(e);
-
-    fs.readFile(filename, common.mustCall(function(e, buffer) {
-      assert.ifError(e);
+  fs.appendFile(filename, s, common.mustSucceed(() => {
+    fs.readFile(filename, common.mustSucceed((buffer) => {
       assert.strictEqual(Buffer.byteLength(s), buffer.length);
     }));
   }));
@@ -57,7 +53,7 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 
 // Test that empty file will be created and have content added (promise API).
 {
-  const filename = join(tmpdir.path, 'append-promise.txt');
+  const filename = tmpdir.resolve('append-promise.txt');
 
   fs.promises.appendFile(filename, s)
     .then(common.mustCall(() => fs.promises.readFile(filename)))
@@ -69,14 +65,11 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 
 // Test that appends data to a non-empty file (callback API).
 {
-  const filename = join(tmpdir.path, 'append-non-empty.txt');
+  const filename = tmpdir.resolve('append-non-empty.txt');
   fs.writeFileSync(filename, currentFileData);
 
-  fs.appendFile(filename, s, common.mustCall(function(e) {
-    assert.ifError(e);
-
-    fs.readFile(filename, common.mustCall(function(e, buffer) {
-      assert.ifError(e);
+  fs.appendFile(filename, s, common.mustSucceed(() => {
+    fs.readFile(filename, common.mustSucceed((buffer) => {
       assert.strictEqual(Buffer.byteLength(s) + currentFileData.length,
                          buffer.length);
     }));
@@ -85,7 +78,7 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 
 // Test that appends data to a non-empty file (promise API).
 {
-  const filename = join(tmpdir.path, 'append-non-empty-promise.txt');
+  const filename = tmpdir.resolve('append-non-empty-promise.txt');
   fs.writeFileSync(filename, currentFileData);
 
   fs.promises.appendFile(filename, s)
@@ -99,16 +92,13 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 
 // Test that appendFile accepts buffers (callback API).
 {
-  const filename = join(tmpdir.path, 'append-buffer.txt');
+  const filename = tmpdir.resolve('append-buffer.txt');
   fs.writeFileSync(filename, currentFileData);
 
   const buf = Buffer.from(s, 'utf8');
 
-  fs.appendFile(filename, buf, common.mustCall((e) => {
-    assert.ifError(e);
-
-    fs.readFile(filename, common.mustCall((e, buffer) => {
-      assert.ifError(e);
+  fs.appendFile(filename, buf, common.mustSucceed(() => {
+    fs.readFile(filename, common.mustSucceed((buffer) => {
       assert.strictEqual(buf.length + currentFileData.length, buffer.length);
     }));
   }));
@@ -116,7 +106,7 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 
 // Test that appendFile accepts buffers (promises API).
 {
-  const filename = join(tmpdir.path, 'append-buffer-promises.txt');
+  const filename = tmpdir.resolve('append-buffer-promises.txt');
   fs.writeFileSync(filename, currentFileData);
 
   const buf = Buffer.from(s, 'utf8');
@@ -130,12 +120,12 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 }
 
 // Test that appendFile does not accept invalid data type (callback API).
-[false, 5, {}, [], null, undefined].forEach(async (data) => {
+[false, 5, {}, null, undefined].forEach(async (data) => {
   const errObj = {
     code: 'ERR_INVALID_ARG_TYPE',
     message: /"data"|"buffer"/
   };
-  const filename = join(tmpdir.path, 'append-invalid-data.txt');
+  const filename = tmpdir.resolve('append-invalid-data.txt');
 
   assert.throws(
     () => fs.appendFile(filename, data, common.mustNotCall()),
@@ -163,20 +153,13 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 
 // Test that appendFile accepts file descriptors (callback API).
 {
-  const filename = join(tmpdir.path, 'append-descriptors.txt');
+  const filename = tmpdir.resolve('append-descriptors.txt');
   fs.writeFileSync(filename, currentFileData);
 
-  fs.open(filename, 'a+', common.mustCall((e, fd) => {
-    assert.ifError(e);
-
-    fs.appendFile(fd, s, common.mustCall((e) => {
-      assert.ifError(e);
-
-      fs.close(fd, common.mustCall((e) => {
-        assert.ifError(e);
-
-        fs.readFile(filename, common.mustCall((e, buffer) => {
-          assert.ifError(e);
+  fs.open(filename, 'a+', common.mustSucceed((fd) => {
+    fs.appendFile(fd, s, common.mustSucceed(() => {
+      fs.close(fd, common.mustSucceed(() => {
+        fs.readFile(filename, common.mustSucceed((buffer) => {
           assert.strictEqual(Buffer.byteLength(s) + currentFileData.length,
                              buffer.length);
         }));
@@ -187,7 +170,7 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 
 // Test that appendFile accepts file descriptors (promises API).
 {
-  const filename = join(tmpdir.path, 'append-descriptors-promises.txt');
+  const filename = tmpdir.resolve('append-descriptors-promises.txt');
   fs.writeFileSync(filename, currentFileData);
 
   let fd;
@@ -206,5 +189,5 @@ const throwNextTick = (e) => { process.nextTick(() => { throw e; }); };
 }
 
 assert.throws(
-  () => fs.appendFile(join(tmpdir.path, 'append6.txt'), console.log),
-  { code: 'ERR_INVALID_CALLBACK' });
+  () => fs.appendFile(tmpdir.resolve('append6.txt'), console.log),
+  { code: 'ERR_INVALID_ARG_TYPE' });

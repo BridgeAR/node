@@ -26,6 +26,8 @@ const common = require('../common');
 const domain = require('domain');
 const http = require('http');
 
+process.on('warning', common.mustNotCall());
+
 const a = domain.create();
 a.enter(); // This will be our "root" domain
 
@@ -44,8 +46,9 @@ const server = http.createServer((req, res) => {
 
   b.on('error', common.mustCall((er) => {
     if (res) {
-      res.writeHead(500);
-      res.end('An error occurred');
+      // Introduce an error on the client by writing unexpected data.
+      // The client is now expecting a chunk header so any letter will have the parser throw an error.
+      res.socket.write('H');
     }
     // res.writeHead(500), res.destroy, etc.
     server.close();
@@ -71,5 +74,5 @@ const server = http.createServer((req, res) => {
     res.pipe(process.stdout);
   });
 
-  c.on('error', common.mustCall((er) => { }));
+  c.on('error', common.mustCall());
 });

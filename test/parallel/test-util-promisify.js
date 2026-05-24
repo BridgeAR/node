@@ -7,6 +7,29 @@ const vm = require('vm');
 const { promisify } = require('util');
 const { customPromisifyArgs } = require('internal/util');
 
+{
+  const warningHandler = common.mustNotCall();
+  process.on('warning', warningHandler);
+  function foo() {}
+  foo.constructor = (async () => {}).constructor;
+  promisify(foo);
+  process.off('warning', warningHandler);
+}
+
+common.expectWarning(
+  'DeprecationWarning',
+  'Calling promisify on a function that returns a Promise is likely a mistake.',
+  'DEP0174');
+promisify(async (callback) => { callback(); })().then(common.mustCall(() => {
+  // We must add the second `expectWarning` call in the `.then` handler, when
+  // the first warning has already been triggered.
+  common.expectWarning(
+    'DeprecationWarning',
+    'Calling promisify on a function that returns a Promise is likely a mistake.',
+    'DEP0174');
+  promisify(async () => {})().then(common.mustNotCall());
+}));
+
 const stat = promisify(fs.stat);
 
 {
@@ -83,7 +106,7 @@ const stat = promisify(fs.stat);
     callback(null, 'foo', 'bar');
   }
   promisify(fn)().then(common.mustCall((value) => {
-    assert.deepStrictEqual(value, 'foo');
+    assert.strictEqual(value, 'foo');
   }));
 }
 
@@ -131,7 +154,7 @@ const stat = promisify(fs.stat);
   (async () => {
     const value = await promisify(fn)(null, 42);
     assert.strictEqual(value, 42);
-  })();
+  })().then(common.mustCall());
 }
 
 {
@@ -159,7 +182,7 @@ const stat = promisify(fs.stat);
     await fn();
     await Promise.resolve();
     return assert.strictEqual(stack, err.stack);
-  })();
+  })().then(common.mustCall());
 }
 
 {
@@ -193,7 +216,7 @@ const stat = promisify(fs.stat);
     }),
     b.then(assert.fail, function(e) {
       assert.strictEqual(err, e);
-    })
+    }),
   ]);
 }
 

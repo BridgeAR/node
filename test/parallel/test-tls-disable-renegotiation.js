@@ -61,20 +61,19 @@ server.listen(0, common.mustCall(() => {
     });
 
     assert.throws(() => client.renegotiate({}, false), {
-      code: 'ERR_INVALID_CALLBACK',
+      code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
     assert.throws(() => client.renegotiate({}, null), {
-      code: 'ERR_INVALID_CALLBACK',
+      code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError',
     });
 
 
     // Negotiation is still permitted for this first
     // attempt. This should succeed.
-    let ok = client.renegotiate(options, common.mustCall((err) => {
-      assert.ifError(err);
+    let ok = client.renegotiate(options, common.mustSucceed(() => {
       // Once renegotiation completes, we write some
       // data to the socket, which triggers the on
       // data event on the server. After that data
@@ -89,9 +88,7 @@ server.listen(0, common.mustCall(() => {
       }));
     }));
     assert.strictEqual(ok, true);
-    client.on('secureConnect', common.mustCall(() => {
-    }));
-    client.on('secure', common.mustCall(() => {
-    }));
+    client.on('secureConnect', common.mustCall());
+    client.on('secure', common.mustCall());
   }));
 }));

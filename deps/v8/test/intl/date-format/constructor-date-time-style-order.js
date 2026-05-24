@@ -10,6 +10,7 @@ let weekday = new Array();
 let year = new Array();
 let month = new Array();
 let day = new Array();
+let dayPeriod = new Array();
 let hour = new Array();
 let minute = new Array();
 let second = new Array();
@@ -20,6 +21,7 @@ let dateStyle = new Array();
 let timeStyle = new Array();
 let timeZone = new Array();
 let era = new Array();
+let fractionalSecondDigits = new Array();
 let timeZoneName = new Array();
 let formatMatcher = new Array();
 
@@ -35,6 +37,9 @@ new Intl.DateTimeFormat(['en-US'], {
   },
   get day() {
     day.push(++getCount);
+  },
+  get dayPeriod() {
+    dayPeriod.push(++getCount);
   },
   get hour() {
     hour.push(++getCount);
@@ -71,37 +76,51 @@ new Intl.DateTimeFormat(['en-US'], {
   get timeZoneName() {
     timeZoneName.push(++getCount);
   },
+  get fractionalSecondDigits() {
+    fractionalSecondDigits.push(++getCount);
+  },
   get formatMatcher() {
     formatMatcher.push(++getCount);
   }
 });
 
 assertEquals(1, weekday.length);
-assertEquals(1, weekday[0]);
-assertEquals(1, year.length);
-assertEquals(2, year[0]);
-assertEquals(1, month.length);
-assertEquals(3, month[0]);
-assertEquals(1, day.length);
-assertEquals(4, day[0]);
 assertEquals(1, hour.length);
-assertEquals(5, hour[0]);
 assertEquals(1, minute.length);
-assertEquals(6, minute[0]);
 assertEquals(1, second.length);
-assertEquals(7, second[0]);
-assertEquals(1, localeMatcher.length);
-assertEquals(8, localeMatcher[0]);
-assertEquals(1, hour12.length);
-assertEquals(9, hour12[0]);
-assertEquals(1, hourCycle.length);
-assertEquals(10, hourCycle[0]);
-assertEquals(1, timeZone.length);
-assertEquals(11, timeZone[0]);
+assertEquals(1, year.length);
+assertEquals(1, month.length);
+assertEquals(1, day.length);
+assertEquals(1, era.length);
+assertEquals(1, timeZoneName.length);
 assertEquals(1, dateStyle.length);
-assertEquals(12, dateStyle[0]);
 assertEquals(1, timeStyle.length);
-assertEquals(13, timeStyle[0]);
-assertEquals(0, era.length);
-assertEquals(0, timeZoneName.length);
-assertEquals(0, formatMatcher.length);
+assertEquals(1, localeMatcher.length);
+assertEquals(1, hour12.length);
+assertEquals(1, hourCycle.length);
+assertEquals(1, timeZone.length);
+assertEquals(1, formatMatcher.length);
+
+// InitializeDateTimeFormat
+assertEquals(1, localeMatcher[0]);
+assertEquals(2, hour12[0]);
+assertEquals(3, hourCycle[0]);
+assertEquals(4, timeZone[0]);
+
+assertEquals(5, weekday[0]);
+assertEquals(6, era[0]);
+assertEquals(7, year[0]);
+assertEquals(8, month[0]);
+assertEquals(9, day[0]);
+assertEquals(10, dayPeriod[0]);
+assertEquals(11, hour[0]);
+assertEquals(12, minute[0]);
+assertEquals(13, second[0]);
+assertEquals(14, fractionalSecondDigits[0]);
+assertEquals(15, timeZoneName[0]);
+
+assertEquals(16, formatMatcher[0]);
+assertEquals(17, dateStyle[0]);
+assertEquals(18, timeStyle[0]);
+
+assertEquals(18, getCount);

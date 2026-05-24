@@ -9,19 +9,10 @@ const {
   pipeline
 } = require('stream');
 const assert = require('assert');
+const http = require('http');
+const fs = require('fs');
 
 async function tests() {
-  {
-    const AsyncIteratorPrototype = Object.getPrototypeOf(
-      Object.getPrototypeOf(async function* () {}).prototype);
-    const rs = new Readable({
-      read() {}
-    });
-    assert.strictEqual(
-      Object.getPrototypeOf(Object.getPrototypeOf(rs[Symbol.asyncIterator]())),
-      AsyncIteratorPrototype);
-  }
-
   {
     // v1 stream
 
@@ -53,9 +44,11 @@ async function tests() {
     });
 
     const iter = Readable.prototype[Symbol.asyncIterator].call(stream);
-    iter.next().catch(common.mustCall((err) => {
-      assert.strictEqual(err.message, 'asd');
-    }));
+    await iter.next()
+      .then(common.mustNotCall())
+      .catch(common.mustCall((err) => {
+        assert.strictEqual(err.message, 'asd');
+      }));
   }
 
   {
@@ -71,7 +64,6 @@ async function tests() {
 
     await (async () => {
       for await (const d of readable) {
-        d;
         return;
       }
     })();
@@ -189,9 +181,16 @@ async function tests() {
     resolved.forEach(common.mustCall(
       (item, i) => assert.strictEqual(item.value, 'hello-' + i), max));
 
-    errors.forEach((promise) => {
+    errors.slice(0, 1).forEach((promise) => {
       promise.catch(common.mustCall((err) => {
         assert.strictEqual(err.message, 'kaboom');
+      }));
+    });
+
+    errors.slice(1).forEach((promise) => {
+      promise.then(common.mustCall(({ done, value }) => {
+        assert.strictEqual(done, true);
+        assert.strictEqual(value, undefined);
       }));
     });
 
@@ -206,7 +205,7 @@ async function tests() {
     const iterator = readable[Symbol.asyncIterator]();
 
     const err = new Error('kaboom');
-    readable.destroy(new Error('kaboom'));
+    readable.destroy(err);
     await assert.rejects(iterator.next.bind(iterator), err);
   }
 
@@ -244,8 +243,8 @@ async function tests() {
 
     let err;
     try {
-      // eslint-disable-next-line no-unused-vars
-      for await (const k of readable) {}
+      // eslint-disable-next-line no-unused-vars, no-empty
+      for await (const k of readable) { }
     } catch (e) {
       err = e;
     }
@@ -282,28 +281,6 @@ async function tests() {
 
     assert.strictEqual(err.message, 'kaboom');
     assert.strictEqual(received, 1);
-  }
-
-  {
-    // Iterator throw.
-
-    const readable = new Readable({
-      objectMode: true,
-      read() {
-        this.push('hello');
-      }
-    });
-
-    readable.on('error', common.mustCall((err) => {
-      assert.strictEqual(err.message, 'kaboom');
-    }));
-
-    const it = readable[Symbol.asyncIterator]();
-    it.throw(new Error('kaboom')).catch(common.mustCall((err) => {
-      assert.strictEqual(err.message, 'kaboom');
-    }));
-
-    assert.strictEqual(readable.destroyed, true);
   }
 
   {
@@ -362,11 +339,17 @@ async function tests() {
     process.nextTick(async () => {
       readable.on('close', common.mustNotCall());
       let received = 0;
-      for await (const k of readable) {
-        // Just make linting pass. This should never run.
-        assert.strictEqual(k, 'hello');
-        received++;
+      let err = null;
+      try {
+        for await (const k of readable) {
+          // Just make linting pass. This should never run.
+          assert.strictEqual(k, 'hello');
+          received++;
+        }
+      } catch (_err) {
+        err = _err;
       }
+      assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
       assert.strictEqual(received, 0);
     });
   }
@@ -436,8 +419,13 @@ async function tests() {
 
     readable.destroy();
 
-    const { done } = await readable[Symbol.asyncIterator]().next();
-    assert.strictEqual(done, true);
+    const it = await readable[Symbol.asyncIterator]();
+    const next = it.next();
+    next
+      .then(common.mustNotCall())
+      .catch(common.mustCall((err) => {
+        assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
+      }));
   }
 
   {
@@ -473,16 +461,14 @@ async function tests() {
         this.push(null);
       }
     });
-    // eslint-disable-next-line no-unused-vars
-    for await (const a of r) {
-    }
-    // eslint-disable-next-line no-unused-vars
-    for await (const b of r) {
-    }
+    // eslint-disable-next-line no-unused-vars, no-empty
+    for await (const a of r) { }
+    // eslint-disable-next-line no-unused-vars, no-empty
+    for await (const b of r) { }
   }
 
   {
-    console.log('destroy mid-stream does not error');
+    console.log('destroy mid-stream errors');
     const r = new Readable({
       objectMode: true,
       read() {
@@ -491,10 +477,16 @@ async function tests() {
       }
     });
 
-    // eslint-disable-next-line no-unused-vars
-    for await (const a of r) {
-      r.destroy(null);
+    let err = null;
+    try {
+      // eslint-disable-next-line no-unused-vars
+      for await (const a of r) {
+        r.destroy(null);
+      }
+    } catch (_err) {
+      err = _err;
     }
+    assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
   }
 
   {
@@ -538,7 +530,7 @@ async function tests() {
   }
 
   {
-    console.log('all next promises must be resolved on destroy');
+    console.log('all next promises must be rejected on destroy');
     const r = new Readable({
       objectMode: true,
       read() {
@@ -549,7 +541,11 @@ async function tests() {
     const c = b.next();
     const d = b.next();
     r.destroy();
-    assert.deepStrictEqual(await c, { done: true, value: undefined });
+    c
+      .then(common.mustNotCall())
+      .catch(common.mustCall((err) => {
+        assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
+      }));
     assert.deepStrictEqual(await d, { done: true, value: undefined });
   }
 
@@ -577,12 +573,15 @@ async function tests() {
       assert.strictEqual(e, err);
     })(), (async () => {
       let e;
+      let x;
       try {
-        await d;
+        x = await d;
       } catch (_e) {
         e = _e;
       }
-      assert.strictEqual(e, err);
+      assert.strictEqual(e, undefined);
+      assert.strictEqual(x.done, true);
+      assert.strictEqual(x.value, undefined);
     })()]);
   }
 
@@ -601,6 +600,55 @@ async function tests() {
     it.next().catch(common.mustCall((err) => {
       assert.strictEqual(err, _err);
     }));
+  }
+
+  {
+    // Don't destroy if no auto destroy.
+    // https://github.com/nodejs/node/issues/35116
+
+    const r = new Readable({
+      autoDestroy: false,
+      read() {
+        this.push('asd');
+        this.push(null);
+      }
+    });
+
+    for await (const chunk of r) { } // eslint-disable-line no-unused-vars, no-empty
+    assert.strictEqual(r.destroyed, false);
+  }
+
+  {
+    // Destroy if no auto destroy and premature break.
+    // https://github.com/nodejs/node/pull/35122/files#r485678318
+
+    const r = new Readable({
+      autoDestroy: false,
+      read() {
+        this.push('asd');
+      }
+    });
+
+    for await (const chunk of r) { // eslint-disable-line no-unused-vars
+      break;
+    }
+    assert.strictEqual(r.destroyed, true);
+  }
+
+  {
+    // Don't destroy before 'end'.
+
+    const r = new Readable({
+      read() {
+        this.push('asd');
+        this.push(null);
+      }
+    }).on('end', () => {
+      assert.strictEqual(r.destroyed, false);
+    });
+
+    for await (const chunk of r) { } // eslint-disable-line no-unused-vars, no-empty
+    assert.strictEqual(r.destroyed, true);
   }
 }
 
@@ -646,7 +694,7 @@ async function tests() {
 }
 
 {
-  // AsyncIterator should finish correctly if destroyed.
+  // AsyncIterator should not finish correctly if destroyed.
 
   const r = new Readable({
     objectMode: true,
@@ -659,8 +707,173 @@ async function tests() {
     const it = r[Symbol.asyncIterator]();
     const next = it.next();
     next
-      .then(common.mustCall(({ done }) => assert.strictEqual(done, true)))
-      .catch(common.mustNotCall());
+      .then(common.mustNotCall())
+      .catch(common.mustCall((err) => {
+        assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
+      }));
+  });
+}
+
+{
+  // AsyncIterator should throw if prematurely closed
+  // before end has been emitted.
+  (async function() {
+    const readable = fs.createReadStream(__filename);
+
+    try {
+      // eslint-disable-next-line no-unused-vars
+      for await (const chunk of readable) {
+        readable.close();
+      }
+
+      assert.fail('should have thrown');
+    } catch (err) {
+      assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
+    }
+
+    assert.ok(readable.destroyed);
+  })().then(common.mustCall());
+}
+
+// AsyncIterator non-destroying iterator
+{
+  function createReadable() {
+    return Readable.from((async function* () {
+      await Promise.resolve();
+      yield 5;
+      await Promise.resolve();
+      yield 7;
+      await Promise.resolve();
+    })());
+  }
+
+  // Check explicit destroying on return
+  (async function() {
+    const readable = createReadable();
+    for await (const chunk of readable.iterator({ destroyOnReturn: true })) {
+      assert.strictEqual(chunk, 5);
+      break;
+    }
+
+    assert.ok(readable.destroyed);
+  })().then(common.mustCall());
+
+  // Check explicit non-destroy with return true
+  (async function() {
+    const readable = createReadable();
+    const opts = { destroyOnReturn: false };
+    for await (const chunk of readable.iterator(opts)) {
+      assert.strictEqual(chunk, 5);
+      break;
+    }
+
+    assert.ok(!readable.destroyed);
+
+    for await (const chunk of readable.iterator(opts)) {
+      assert.strictEqual(chunk, 7);
+    }
+
+    assert.ok(readable.destroyed);
+  })().then(common.mustCall());
+
+  // Check non-object options.
+  {
+    const readable = createReadable();
+    assert.throws(
+      () => readable.iterator(42),
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message: 'The "options" argument must be of type object. Received ' +
+                 'type number (42)',
+      }
+    );
+  }
+
+  // Check for dangling listeners
+  (async function() {
+    const readable = createReadable();
+    const opts = { destroyOnReturn: false };
+    while (readable.readable) {
+      // eslint-disable-next-line no-unused-vars
+      for await (const chunk of readable.iterator(opts)) {
+        break;
+      }
+    }
+
+    assert.deepStrictEqual(readable.eventNames(), []);
+  })().then(common.mustCall());
+}
+
+{
+  let _req;
+  const server = http.createServer((request, response) => {
+    response.statusCode = 404;
+    response.write('never ends');
+  });
+
+  server.listen(() => {
+    _req = http.request(`http://localhost:${server.address().port}`)
+      .on('response', common.mustCall(async (res) => {
+        setTimeout(() => {
+          _req.destroy(new Error('something happened'));
+        }, 100);
+
+        res.on('error', common.mustCall());
+
+        let _err;
+        try {
+          // eslint-disable-next-line no-unused-vars, no-empty
+          for await (const chunk of res) { }
+        } catch (err) {
+          _err = err;
+        }
+
+        assert.strictEqual(_err.code, 'ECONNRESET');
+        server.close();
+      }))
+      .on('error', common.mustCall())
+      .end();
+  });
+}
+
+{
+  async function getParsedBody(request) {
+    let body = '';
+
+    for await (const data of request) {
+      body += data;
+    }
+
+    try {
+      return JSON.parse(body);
+    } catch {
+      return {};
+    }
+  }
+
+  const str = JSON.stringify({ asd: true });
+  const server = http.createServer(async (request, response) => {
+    const body = await getParsedBody(request);
+    response.statusCode = 200;
+    assert.strictEqual(JSON.stringify(body), str);
+    response.end(JSON.stringify(body));
+  }).listen(() => {
+    http
+      .request({
+        method: 'POST',
+        hostname: 'localhost',
+        port: server.address().port,
+      })
+      .end(str)
+      .on('response', async (res) => {
+        let body = '';
+        for await (const chunk of res) {
+          body += chunk;
+        }
+        assert.strictEqual(body, str);
+        server.close();
+      });
   });
 }
 

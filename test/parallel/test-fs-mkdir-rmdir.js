@@ -2,10 +2,9 @@
 
 const common = require('../common');
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs');
 const tmpdir = require('../common/tmpdir');
-const d = path.join(tmpdir.path, 'dir');
+const d = tmpdir.resolve('dir');
 
 tmpdir.refresh();
 
@@ -25,13 +24,11 @@ fs.rmdirSync(d);
 assert(!fs.existsSync(d));
 
 // Similarly test the Async version
-fs.mkdir(d, 0o666, common.mustCall(function(err) {
-  assert.ifError(err);
-
+fs.mkdir(d, 0o666, common.mustSucceed(() => {
   fs.mkdir(d, 0o666, common.mustCall(function(err) {
     assert.strictEqual(this, undefined);
     assert.ok(err, 'got no error');
-    assert.ok(/^EEXIST/.test(err.message), 'got no EEXIST message');
+    assert.match(err.message, /^EEXIST/);
     assert.strictEqual(err.code, 'EEXIST');
     assert.strictEqual(err.path, d);
 

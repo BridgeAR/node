@@ -9,8 +9,8 @@
 
 #include "libplatform/libplatform-export.h"
 #include "libplatform/v8-tracing.h"
-#include "v8-platform.h"  // NOLINT(build/include)
-#include "v8config.h"     // NOLINT(build/include)
+#include "v8-platform.h"  // NOLINT(build/include_directory)
+#include "v8config.h"     // NOLINT(build/include_directory)
 
 namespace v8 {
 namespace platform {
@@ -22,6 +22,8 @@ enum class MessageLoopBehavior : bool {
   kDoNotWait = false,
   kWaitForWork = true
 };
+
+enum class PriorityMode : bool { kDontApply, kApply };
 
 /**
  * Returns a new instance of the default v8::Platform implementation.
@@ -35,13 +37,38 @@ enum class MessageLoopBehavior : bool {
  * calling v8::platform::RunIdleTasks to process the idle tasks.
  * If |tracing_controller| is nullptr, the default platform will create a
  * v8::platform::TracingController instance and use it.
+ * If |priority_mode| is PriorityMode::kApply, the default platform will use
+ * multiple task queues executed by threads different system-level priorities
+ * (where available) to schedule tasks.
  */
 V8_PLATFORM_EXPORT std::unique_ptr<v8::Platform> NewDefaultPlatform(
     int thread_pool_size = 0,
     IdleTaskSupport idle_task_support = IdleTaskSupport::kDisabled,
     InProcessStackDumping in_process_stack_dumping =
         InProcessStackDumping::kDisabled,
+    std::unique_ptr<v8::TracingController> tracing_controller = {},
+    PriorityMode priority_mode = PriorityMode::kDontApply);
+
+/**
+ * The same as NewDefaultPlatform but disables the worker thread pool.
+ * It must be used with the --single-threaded V8 flag.
+ */
+V8_PLATFORM_EXPORT std::unique_ptr<v8::Platform>
+NewSingleThreadedDefaultPlatform(
+    IdleTaskSupport idle_task_support = IdleTaskSupport::kDisabled,
+    InProcessStackDumping in_process_stack_dumping =
+        InProcessStackDumping::kDisabled,
     std::unique_ptr<v8::TracingController> tracing_controller = {});
+
+/**
+ * Returns a new instance of the default v8::JobHandle implementation.
+ *
+ * The job will be executed by spawning up to |num_worker_threads| many worker
+ * threads on the provided |platform| with the given |priority|.
+ */
+V8_PLATFORM_EXPORT std::unique_ptr<v8::JobHandle> NewDefaultJobHandle(
+    v8::Platform* platform, v8::TaskPriority priority,
+    std::unique_ptr<v8::JobTask> job_task, size_t num_worker_threads);
 
 /**
  * Pumps the message loop for the given isolate.
@@ -69,15 +96,15 @@ V8_PLATFORM_EXPORT void RunIdleTasks(v8::Platform* platform,
                                      double idle_time_in_seconds);
 
 /**
- * Attempts to set the tracing controller for the given platform.
+ * Notifies the given platform about the Isolate getting deleted soon. Has to be
+ * called for all Isolates which are deleted - unless we're shutting down the
+ * platform.
  *
  * The |platform| has to be created using |NewDefaultPlatform|.
  *
  */
-V8_DEPRECATE_SOON("Access the DefaultPlatform directly")
-V8_PLATFORM_EXPORT void SetTracingController(
-    v8::Platform* platform,
-    v8::platform::tracing::TracingController* tracing_controller);
+V8_PLATFORM_EXPORT void NotifyIsolateShutdown(v8::Platform* platform,
+                                              Isolate* isolate);
 
 }  // namespace platform
 }  // namespace v8

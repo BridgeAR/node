@@ -5,14 +5,18 @@
 #ifndef V8_OBJECTS_JS_PROMISE_H_
 #define V8_OBJECTS_JS_PROMISE_H_
 
+#include "include/v8-promise.h"
 #include "src/objects/js-objects.h"
 #include "src/objects/promise.h"
+#include "torque-generated/bit-fields.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
 
 namespace v8 {
 namespace internal {
+
+#include "torque-generated/src/objects/js-promise-tq.inc"
 
 // Representation of promise objects in the specification. Our layout of
 // JSPromise differs a bit from the layout in the specification, for example
@@ -24,13 +28,14 @@ namespace internal {
 // We also overlay the result and reactions fields on the JSPromise, since
 // the reactions are only necessary for pending promises, whereas the result
 // is only meaningful for settled promises.
-class JSPromise : public TorqueGeneratedJSPromise<JSPromise, JSObject> {
+class JSPromise
+    : public TorqueGeneratedJSPromise<JSPromise, JSObjectWithEmbedderSlots> {
  public:
   // [result]: Checks that the promise is settled and returns the result.
-  inline Object result() const;
+  inline Tagged<Object> result() const;
 
   // [reactions]: Checks that the promise is pending and returns the reactions.
-  inline Object reactions() const;
+  inline Tagged<Object> reactions() const;
 
   // [has_handler]: Whether this promise has a reject handler or not.
   DECL_BOOLEAN_ACCESSORS(has_handler)
@@ -38,6 +43,10 @@ class JSPromise : public TorqueGeneratedJSPromise<JSPromise, JSObject> {
   // [handled_hint]: Whether this promise will be handled by a catch
   // block in an async function.
   DECL_BOOLEAN_ACCESSORS(handled_hint)
+
+  // [is_silent]: Whether this promise should cause the debugger to pause when
+  // rejected.
+  DECL_BOOLEAN_ACCESSORS(is_silent)
 
   int async_task_id() const;
   void set_async_task_id(int id);
@@ -64,18 +73,11 @@ class JSPromise : public TorqueGeneratedJSPromise<JSPromise, JSObject> {
       kHeaderSize + v8::Promise::kEmbedderFieldCount * kEmbedderDataSlotSize;
 
   // Flags layout.
-  // The first two bits store the v8::Promise::PromiseState.
-  static const int kStatusBits = 2;
-  static const int kHasHandlerBit = 2;
-  static const int kHandledHintBit = 3;
-  using AsyncTaskIdField = base::BitField<int, kHandledHintBit + 1, 22>;
+  DEFINE_TORQUE_GENERATED_JS_PROMISE_FLAGS()
 
-  static const int kStatusShift = 0;
-  static const int kStatusMask = 0x3;
-  static const int kHasHandlerMask = 0x4;
-  STATIC_ASSERT(v8::Promise::kPending == 0);
-  STATIC_ASSERT(v8::Promise::kFulfilled == 1);
-  STATIC_ASSERT(v8::Promise::kRejected == 2);
+  static_assert(v8::Promise::kPending == 0);
+  static_assert(v8::Promise::kFulfilled == 1);
+  static_assert(v8::Promise::kRejected == 2);
 
  private:
   // ES section #sec-triggerpromisereactions

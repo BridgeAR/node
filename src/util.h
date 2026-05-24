@@ -24,14 +24,10 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#if (__GNUC__ >= 8) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
 #include "v8.h"
-#if (__GNUC__ >= 8) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
+
+#include "node.h"
+#include "node_exit_code.h"
 
 #include <climits>
 #include <cstddef>
@@ -39,13 +35,16 @@
 #include <cstdlib>
 #include <cstring>
 
-#include <functional>  // std::function
+#include <array>
 #include <limits>
+#include <memory>
 #include <set>
 #include <string>
-#include <array>
+#include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #ifdef __GNUC__
 #define MUST_USE_RESULT __attribute__((warn_unused_result))
@@ -98,7 +97,7 @@ inline T MultiplyWithOverflowCheck(T a, T b);
 
 namespace per_process {
 // Tells whether the per-process V8::Initialize() is called and
-// if it is safe to call v8::Isolate::GetCurrent().
+// if it is safe to call v8::Isolate::TryGetCurrent().
 extern bool v8_initialized;
 }  // namespace per_process
 
@@ -114,13 +113,14 @@ struct AssertionInfo {
   const char* message;
   const char* function;
 };
-[[noreturn]] void Assert(const AssertionInfo& info);
-[[noreturn]] void Abort();
-void DumpBacktrace(FILE* fp);
+[[noreturn]] void NODE_EXTERN_PRIVATE Assert(const AssertionInfo& info);
+[[noreturn]] void NODE_EXTERN_PRIVATE Abort();
+void DumpNativeBacktrace(FILE* fp);
+void DumpJavaScriptBacktrace(FILE* fp);
 
 // Windows 8+ does not like abort() in Release mode
 #ifdef _WIN32
-#define ABORT_NO_BACKTRACE() _exit(134)
+#define ABORT_NO_BACKTRACE() _exit(static_cast<int>(node::ExitCode::kAbort))
 #else
 #define ABORT_NO_BACKTRACE() abort()
 #endif
@@ -275,6 +275,37 @@ template <typename Inner, typename Outer>
 constexpr ContainerOfHelper<Inner, Outer> ContainerOf(Inner Outer::*field,
                                                       Inner* pointer);
 
+class KVStore {
+ public:
+  KVStore() = default;
+  virtual ~KVStore() = default;
+  KVStore(const KVStore&) = delete;
+  KVStore& operator=(const KVStore&) = delete;
+  KVStore(KVStore&&) = delete;
+  KVStore& operator=(KVStore&&) = delete;
+
+  virtual v8::MaybeLocal<v8::String> Get(v8::Isolate* isolate,
+                                         v8::Local<v8::String> key) const = 0;
+  virtual v8::Maybe<std::string> Get(const char* key) const = 0;
+  virtual void Set(v8::Isolate* isolate,
+                   v8::Local<v8::String> key,
+                   v8::Local<v8::String> value) = 0;
+  virtual int32_t Query(v8::Isolate* isolate,
+                        v8::Local<v8::String> key) const = 0;
+  virtual int32_t Query(const char* key) const = 0;
+  virtual void Delete(v8::Isolate* isolate, v8::Local<v8::String> key) = 0;
+  virtual v8::Local<v8::Array> Enumerate(v8::Isolate* isolate) const = 0;
+
+  virtual std::shared_ptr<KVStore> Clone(v8::Isolate* isolate) const;
+  virtual v8::Maybe<bool> AssignFromObject(v8::Local<v8::Context> context,
+                                           v8::Local<v8::Object> entries);
+  v8::Maybe<bool> AssignToObject(v8::Isolate* isolate,
+                                 v8::Local<v8::Context> context,
+                                 v8::Local<v8::Object> object);
+
+  static std::shared_ptr<KVStore> CreateMapKVStore();
+};
+
 // Convenience wrapper around v8::String::NewFromOneByte().
 inline v8::Local<v8::String> OneByteString(v8::Isolate* isolate,
                                            const char* data,
@@ -331,6 +362,11 @@ constexpr size_t arraysize(const T (&)[N]) {
   return N;
 }
 
+template <typename T, size_t N>
+constexpr size_t strsize(const T (&)[N]) {
+  return N - 1;
+}
+
 // Allocates an array of member type T. For up to kStackStorageSize items,
 // the stack is used, otherwise malloc().
 template <typename T, size_t kStackStorageSize = 1024>
@@ -377,19 +413,7 @@ class MaybeStackBuffer {
   // This method can be called multiple times throughout the lifetime of the
   // buffer, but once this has been called Invalidate() cannot be used.
   // Content of the buffer in the range [0, length()) is preserved.
-  void AllocateSufficientStorage(size_t storage) {
-    CHECK(!IsInvalidated());
-    if (storage > capacity()) {
-      bool was_allocated = IsAllocated();
-      T* allocated_ptr = was_allocated ? buf_ : nullptr;
-      buf_ = Realloc(allocated_ptr, storage);
-      capacity_ = storage;
-      if (!was_allocated && length_ > 0)
-        memcpy(buf_, buf_st_, length_ * sizeof(buf_[0]));
-    }
-
-    length_ = storage;
-  }
+  void AllocateSufficientStorage(size_t storage);
 
   void SetLength(size_t length) {
     // capacity() returns how much memory is actually available.
@@ -406,7 +430,7 @@ class MaybeStackBuffer {
     buf_[length] = T();
   }
 
-  // Make derefencing this object return nullptr.
+  // Make dereferencing this object return nullptr.
   // This method can be called multiple times throughout the lifetime of the
   // buffer, but once this has been called AllocateSufficientStorage() cannot
   // be used.
@@ -451,6 +475,11 @@ class MaybeStackBuffer {
       free(buf_);
   }
 
+  inline std::basic_string<T> ToString() const { return {out(), length()}; }
+  inline std::basic_string_view<T> ToStringView() const {
+    return {out(), length()};
+  }
+
  private:
   size_t length_;
   // capacity of the malloc'ed buf_
@@ -467,18 +496,31 @@ class ArrayBufferViewContents {
  public:
   ArrayBufferViewContents() = default;
 
+  ArrayBufferViewContents(const ArrayBufferViewContents&) = delete;
+  void operator=(const ArrayBufferViewContents&) = delete;
+
   explicit inline ArrayBufferViewContents(v8::Local<v8::Value> value);
   explicit inline ArrayBufferViewContents(v8::Local<v8::Object> value);
   explicit inline ArrayBufferViewContents(v8::Local<v8::ArrayBufferView> abv);
   inline void Read(v8::Local<v8::ArrayBufferView> abv);
+  inline void ReadValue(v8::Local<v8::Value> buf);
 
+  inline bool WasDetached() const { return was_detached_; }
   inline const T* data() const { return data_; }
   inline size_t length() const { return length_; }
 
  private:
+  // Declaring operator new and delete as deleted is not spec compliant.
+  // Therefore, declare them private instead to disable dynamic alloc.
+  void* operator new(size_t size);
+  void* operator new[](size_t size);
+  void operator delete(void*, size_t);
+  void operator delete[](void*, size_t);
+
   T stack_storage_[kStackStorageSize];
   T* data_ = nullptr;
   size_t length_ = 0;
+  bool was_detached_ = false;
 };
 
 class Utf8Value : public MaybeStackBuffer<char> {
@@ -486,6 +528,12 @@ class Utf8Value : public MaybeStackBuffer<char> {
   explicit Utf8Value(v8::Isolate* isolate, v8::Local<v8::Value> value);
 
   inline std::string ToString() const { return std::string(out(), length()); }
+  inline std::string_view ToStringView() const {
+    return std::string_view(out(), length());
+  }
+
+  inline bool operator==(const char* a) const { return strcmp(out(), a) == 0; }
+  inline bool operator!=(const char* a) const { return !(*this == a); }
 };
 
 class TwoByteValue : public MaybeStackBuffer<uint16_t> {
@@ -498,19 +546,19 @@ class BufferValue : public MaybeStackBuffer<char> {
   explicit BufferValue(v8::Isolate* isolate, v8::Local<v8::Value> value);
 
   inline std::string ToString() const { return std::string(out(), length()); }
+  inline std::string_view ToStringView() const {
+    return std::string_view(out(), length());
+  }
 };
 
-#define SPREAD_BUFFER_ARG(val, name)                                          \
-  CHECK((val)->IsArrayBufferView());                                          \
-  v8::Local<v8::ArrayBufferView> name = (val).As<v8::ArrayBufferView>();      \
-  std::shared_ptr<v8::BackingStore> name##_bs =                               \
-      name->Buffer()->GetBackingStore();                                      \
-  const size_t name##_offset = name->ByteOffset();                            \
-  const size_t name##_length = name->ByteLength();                            \
-  char* const name##_data =                                                   \
-      static_cast<char*>(name##_bs->Data()) + name##_offset;                  \
-  if (name##_length > 0)                                                      \
-    CHECK_NE(name##_data, nullptr);
+#define SPREAD_BUFFER_ARG(val, name)                                           \
+  CHECK((val)->IsArrayBufferView());                                           \
+  v8::Local<v8::ArrayBufferView> name = (val).As<v8::ArrayBufferView>();       \
+  const size_t name##_offset = name->ByteOffset();                             \
+  const size_t name##_length = name->ByteLength();                             \
+  char* const name##_data =                                                    \
+      static_cast<char*>(name->Buffer()->Data()) + name##_offset;              \
+  if (name##_length > 0) CHECK_NE(name##_data, nullptr);
 
 // Use this when a variable or parameter is unused in order to explicitly
 // silence a compiler warning about that.
@@ -529,12 +577,6 @@ struct OnScopeLeaveImpl {
   OnScopeLeaveImpl(OnScopeLeaveImpl&& other)
     : fn_(std::move(other.fn_)), active_(other.active_) {
     other.active_ = false;
-  }
-  OnScopeLeaveImpl& operator=(OnScopeLeaveImpl&& other) {
-    if (this == &other) return *this;
-    this->~OnScopeLeave();
-    new (this)OnScopeLeaveImpl(std::move(other));
-    return *this;
   }
 };
 
@@ -560,11 +602,16 @@ struct MallocedBuffer {
   }
 
   void Truncate(size_t new_size) {
-    CHECK(new_size <= size);
+    CHECK_LE(new_size, size);
     size = new_size;
   }
 
-  inline bool is_empty() const { return data == nullptr; }
+  void Realloc(size_t new_size) {
+    Truncate(new_size);
+    data = UncheckedRealloc(data, new_size);
+  }
+
+  bool is_empty() const { return data == nullptr; }
 
   MallocedBuffer() : data(nullptr), size(0) {}
   explicit MallocedBuffer(size_t size) : data(Malloc<T>(size)), size(size) {}
@@ -593,6 +640,15 @@ class NonCopyableMaybe {
 
   bool IsEmpty() const {
     return empty_;
+  }
+
+  const T* get() const {
+    return empty_ ? nullptr : &value_;
+  }
+
+  const T* operator->() const {
+    CHECK(!empty_);
+    return &value_;
   }
 
   T&& Release() {
@@ -624,10 +680,11 @@ struct FunctionDeleter {
 template <typename T, void (*function)(T*)>
 using DeleteFnPtr = typename FunctionDeleter<T, function>::Pointer;
 
-std::vector<std::string> SplitString(const std::string& in, char delim);
+std::vector<std::string_view> SplitString(const std::string_view in,
+                                          const std::string_view delim);
 
 inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
-                                           const std::string& str,
+                                           std::string_view str,
                                            v8::Isolate* isolate = nullptr);
 template <typename T, typename test_for_number =
     typename std::enable_if<std::numeric_limits<T>::is_specialized, bool>::type>
@@ -637,6 +694,10 @@ inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
 template <typename T>
 inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
                                            const std::vector<T>& vec,
+                                           v8::Isolate* isolate = nullptr);
+template <typename T>
+inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
+                                           const std::set<T>& set,
                                            v8::Isolate* isolate = nullptr);
 template <typename T, typename U>
 inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
@@ -676,11 +737,9 @@ inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
   do {                                                                         \
     v8::Isolate* isolate = target->GetIsolate();                               \
     v8::Local<v8::String> constant_name =                                      \
-        v8::String::NewFromUtf8(isolate, name, v8::NewStringType::kNormal)     \
-            .ToLocalChecked();                                                 \
+        v8::String::NewFromUtf8(isolate, name).ToLocalChecked();               \
     v8::Local<v8::String> constant_value =                                     \
-        v8::String::NewFromUtf8(isolate, constant, v8::NewStringType::kNormal) \
-            .ToLocalChecked();                                                 \
+        v8::String::NewFromUtf8(isolate, constant).ToLocalChecked();           \
     v8::PropertyAttribute constant_attributes =                                \
         static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete);     \
     target                                                                     \
@@ -691,32 +750,36 @@ inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
         .Check();                                                              \
   } while (0)
 
-enum Endianness {
-  kLittleEndian,  // _Not_ LITTLE_ENDIAN, clashes with endian.h.
-  kBigEndian
-};
+enum class Endianness { LITTLE, BIG };
 
-inline enum Endianness GetEndianness() {
+inline Endianness GetEndianness() {
   // Constant-folded by the compiler.
   const union {
     uint8_t u8[2];
     uint16_t u16;
   } u = {{1, 0}};
-  return u.u16 == 1 ? kLittleEndian : kBigEndian;
+  return u.u16 == 1 ? Endianness::LITTLE : Endianness::BIG;
 }
 
 inline bool IsLittleEndian() {
-  return GetEndianness() == kLittleEndian;
+  return GetEndianness() == Endianness::LITTLE;
 }
 
 inline bool IsBigEndian() {
-  return GetEndianness() == kBigEndian;
+  return GetEndianness() == Endianness::BIG;
 }
 
 // Round up a to the next highest multiple of b.
 template <typename T>
 constexpr T RoundUp(T a, T b) {
   return a % b != 0 ? a + b - (a % b) : a;
+}
+
+// Align ptr to an `alignment`-bytes boundary.
+template <typename T, typename U>
+constexpr T* AlignUp(T* ptr, U alignment) {
+  return reinterpret_cast<T*>(
+      RoundUp(reinterpret_cast<uintptr_t>(ptr), alignment));
 }
 
 class SlicedArguments : public MaybeStackBuffer<v8::Local<v8::Value>> {
@@ -751,6 +814,7 @@ class PersistentToLocal {
   template <class TypeName>
   static inline v8::Local<TypeName> Strong(
       const v8::PersistentBase<TypeName>& persistent) {
+    DCHECK(!persistent.IsWeak());
     return *reinterpret_cast<v8::Local<TypeName>*>(
         const_cast<v8::PersistentBase<TypeName>*>(&persistent));
   }
@@ -768,20 +832,168 @@ class PersistentToLocal {
 // computations.
 class FastStringKey {
  public:
-  constexpr explicit FastStringKey(const char* name);
+  constexpr explicit FastStringKey(std::string_view name);
 
   struct Hash {
     constexpr size_t operator()(const FastStringKey& key) const;
   };
   constexpr bool operator==(const FastStringKey& other) const;
 
-  constexpr const char* c_str() const;
+  constexpr std::string_view as_string_view() const;
 
  private:
-  static constexpr size_t HashImpl(const char* str);
+  static constexpr size_t HashImpl(std::string_view str);
 
-  const char* name_;
-  size_t cached_hash_;
+  const std::string_view name_;
+  const size_t cached_hash_;
+};
+
+// Like std::static_pointer_cast but for unique_ptr with the default deleter.
+template <typename T, typename U>
+std::unique_ptr<T> static_unique_pointer_cast(std::unique_ptr<U>&& ptr) {
+  return std::unique_ptr<T>(static_cast<T*>(ptr.release()));
+}
+
+#define MAYBE_FIELD_PTR(ptr, field) ptr == nullptr ? nullptr : &(ptr->field)
+
+// Returns a non-zero code if it fails to open or read the file,
+// aborts if it fails to close the file.
+int ReadFileSync(std::string* result, const char* path);
+// Reads all contents of a FILE*, aborts if it fails.
+std::vector<char> ReadFileSync(FILE* fp);
+
+v8::Local<v8::FunctionTemplate> NewFunctionTemplate(
+    v8::Isolate* isolate,
+    v8::FunctionCallback callback,
+    v8::Local<v8::Signature> signature = v8::Local<v8::Signature>(),
+    v8::ConstructorBehavior behavior = v8::ConstructorBehavior::kAllow,
+    v8::SideEffectType side_effect = v8::SideEffectType::kHasSideEffect,
+    const v8::CFunction* c_function = nullptr);
+
+// Convenience methods for NewFunctionTemplate().
+void SetMethod(v8::Local<v8::Context> context,
+               v8::Local<v8::Object> that,
+               const std::string_view name,
+               v8::FunctionCallback callback);
+// Similar to SetProtoMethod but without receiver signature checks.
+void SetMethod(v8::Isolate* isolate,
+               v8::Local<v8::Template> that,
+               const std::string_view name,
+               v8::FunctionCallback callback);
+
+void SetFastMethod(v8::Isolate* isolate,
+                   v8::Local<v8::Template> that,
+                   const std::string_view name,
+                   v8::FunctionCallback slow_callback,
+                   const v8::CFunction* c_function);
+void SetFastMethod(v8::Local<v8::Context> context,
+                   v8::Local<v8::Object> that,
+                   const std::string_view name,
+                   v8::FunctionCallback slow_callback,
+                   const v8::CFunction* c_function);
+void SetFastMethod(v8::Isolate* isolate,
+                   v8::Local<v8::Template> that,
+                   const std::string_view name,
+                   v8::FunctionCallback slow_callback,
+                   const v8::MemorySpan<const v8::CFunction>& methods);
+void SetFastMethodNoSideEffect(v8::Isolate* isolate,
+                               v8::Local<v8::Template> that,
+                               const std::string_view name,
+                               v8::FunctionCallback slow_callback,
+                               const v8::CFunction* c_function);
+void SetFastMethodNoSideEffect(v8::Local<v8::Context> context,
+                               v8::Local<v8::Object> that,
+                               const std::string_view name,
+                               v8::FunctionCallback slow_callback,
+                               const v8::CFunction* c_function);
+void SetFastMethodNoSideEffect(
+    v8::Isolate* isolate,
+    v8::Local<v8::Template> that,
+    const std::string_view name,
+    v8::FunctionCallback slow_callback,
+    const v8::MemorySpan<const v8::CFunction>& methods);
+void SetProtoMethod(v8::Isolate* isolate,
+                    v8::Local<v8::FunctionTemplate> that,
+                    const std::string_view name,
+                    v8::FunctionCallback callback);
+
+void SetInstanceMethod(v8::Isolate* isolate,
+                       v8::Local<v8::FunctionTemplate> that,
+                       const std::string_view name,
+                       v8::FunctionCallback callback);
+
+// Safe variants denote the function has no side effects.
+void SetMethodNoSideEffect(v8::Local<v8::Context> context,
+                           v8::Local<v8::Object> that,
+                           const std::string_view name,
+                           v8::FunctionCallback callback);
+void SetProtoMethodNoSideEffect(v8::Isolate* isolate,
+                                v8::Local<v8::FunctionTemplate> that,
+                                const std::string_view name,
+                                v8::FunctionCallback callback);
+void SetMethodNoSideEffect(v8::Isolate* isolate,
+                           v8::Local<v8::Template> that,
+                           const std::string_view name,
+                           v8::FunctionCallback callback);
+
+enum class SetConstructorFunctionFlag {
+  NONE,
+  SET_CLASS_NAME,
+};
+
+void SetConstructorFunction(v8::Local<v8::Context> context,
+                            v8::Local<v8::Object> that,
+                            const char* name,
+                            v8::Local<v8::FunctionTemplate> tmpl,
+                            SetConstructorFunctionFlag flag =
+                                SetConstructorFunctionFlag::SET_CLASS_NAME);
+
+void SetConstructorFunction(v8::Local<v8::Context> context,
+                            v8::Local<v8::Object> that,
+                            v8::Local<v8::String> name,
+                            v8::Local<v8::FunctionTemplate> tmpl,
+                            SetConstructorFunctionFlag flag =
+                                SetConstructorFunctionFlag::SET_CLASS_NAME);
+
+void SetConstructorFunction(v8::Isolate* isolate,
+                            v8::Local<v8::Template> that,
+                            const char* name,
+                            v8::Local<v8::FunctionTemplate> tmpl,
+                            SetConstructorFunctionFlag flag =
+                                SetConstructorFunctionFlag::SET_CLASS_NAME);
+
+void SetConstructorFunction(v8::Isolate* isolate,
+                            v8::Local<v8::Template> that,
+                            v8::Local<v8::String> name,
+                            v8::Local<v8::FunctionTemplate> tmpl,
+                            SetConstructorFunctionFlag flag =
+                                SetConstructorFunctionFlag::SET_CLASS_NAME);
+
+// Like RAIIIsolate, except doesn't enter the isolate while it's in scope.
+class RAIIIsolateWithoutEntering {
+ public:
+  explicit RAIIIsolateWithoutEntering(const SnapshotData* data = nullptr);
+  ~RAIIIsolateWithoutEntering();
+
+  v8::Isolate* get() const { return isolate_; }
+
+ private:
+  std::unique_ptr<v8::ArrayBuffer::Allocator> allocator_;
+  v8::Isolate* isolate_;
+};
+
+// Simple RAII class to spin up a v8::Isolate instance and enter it
+// immediately.
+class RAIIIsolate {
+ public:
+  explicit RAIIIsolate(const SnapshotData* data = nullptr);
+  ~RAIIIsolate();
+
+  v8::Isolate* get() const { return isolate_.get(); }
+
+ private:
+  RAIIIsolateWithoutEntering isolate_;
+  v8::Isolate::Scope isolate_scope_;
 };
 
 }  // namespace node

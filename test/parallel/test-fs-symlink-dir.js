@@ -12,17 +12,18 @@ if (!common.canCreateSymLink())
 const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
+const fsPromises = fs.promises;
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
 const linkTargets = [
   'relative-target',
-  path.join(tmpdir.path, 'absolute-target')
+  tmpdir.resolve('absolute-target'),
 ];
 const linkPaths = [
-  path.relative(process.cwd(), path.join(tmpdir.path, 'relative-path')),
-  path.join(tmpdir.path, 'absolute-path')
+  path.relative(process.cwd(), tmpdir.resolve('relative-path')),
+  tmpdir.resolve('absolute-path'),
 ];
 
 function testSync(target, path) {
@@ -31,17 +32,23 @@ function testSync(target, path) {
 }
 
 function testAsync(target, path) {
-  fs.symlink(target, path, common.mustCall((err) => {
-    assert.ifError(err);
+  fs.symlink(target, path, common.mustSucceed(() => {
     fs.readdirSync(path);
   }));
 }
 
+async function testPromises(target, path) {
+  await fsPromises.symlink(target, path);
+  fs.readdirSync(path);
+}
+
 for (const linkTarget of linkTargets) {
-  fs.mkdirSync(path.resolve(tmpdir.path, linkTarget));
+  fs.mkdirSync(tmpdir.resolve(linkTarget));
   for (const linkPath of linkPaths) {
     testSync(linkTarget, `${linkPath}-${path.basename(linkTarget)}-sync`);
     testAsync(linkTarget, `${linkPath}-${path.basename(linkTarget)}-async`);
+    testPromises(linkTarget, `${linkPath}-${path.basename(linkTarget)}-promises`)
+      .then(common.mustCall());
   }
 }
 
@@ -53,16 +60,22 @@ for (const linkTarget of linkTargets) {
   }
 
   function testAsync(target, path) {
-    fs.symlink(target, path, common.mustCall((err) => {
-      assert.ifError(err);
+    fs.symlink(target, path, common.mustSucceed(() => {
       assert(!fs.existsSync(path));
     }));
+  }
+
+  async function testPromises(target, path) {
+    await fsPromises.symlink(target, path);
+    assert(!fs.existsSync(path));
   }
 
   for (const linkTarget of linkTargets.map((p) => p + '-broken')) {
     for (const linkPath of linkPaths) {
       testSync(linkTarget, `${linkPath}-${path.basename(linkTarget)}-sync`);
       testAsync(linkTarget, `${linkPath}-${path.basename(linkTarget)}-async`);
+      testPromises(linkTarget, `${linkPath}-${path.basename(linkTarget)}-promises`)
+        .then(common.mustCall());
     }
   }
 }

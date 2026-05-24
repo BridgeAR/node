@@ -3,9 +3,11 @@
 // found in the LICENSE file.
 
 #include "src/builtins/builtins-bigint-gen.h"
+
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
 #include "src/codegen/code-stub-assembler.h"
+#include "src/objects/dictionary.h"
 
 namespace v8 {
 namespace internal {
@@ -17,8 +19,8 @@ TF_BUILTIN(BigIntToI64, CodeStubAssembler) {
     return;
   }
 
-  TNode<Object> value = CAST(Parameter(Descriptor::kArgument));
-  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  auto value = Parameter<Object>(Descriptor::kArgument);
+  auto context = Parameter<Context>(Descriptor::kContext);
   TNode<BigInt> n = ToBigInt(context, value);
 
   TVARIABLE(UintPtrT, var_low);
@@ -35,8 +37,8 @@ TF_BUILTIN(BigIntToI32Pair, CodeStubAssembler) {
     return;
   }
 
-  TNode<Object> value = CAST(Parameter(Descriptor::kArgument));
-  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  auto value = Parameter<Object>(Descriptor::kArgument);
+  auto context = Parameter<Context>(Descriptor::kContext);
   TNode<BigInt> bigint = ToBigInt(context, value);
 
   TVARIABLE(UintPtrT, var_low);
@@ -53,8 +55,7 @@ TF_BUILTIN(I64ToBigInt, CodeStubAssembler) {
     return;
   }
 
-  TNode<IntPtrT> argument =
-      UncheckedCast<IntPtrT>(Parameter(Descriptor::kArgument));
+  auto argument = UncheckedParameter<IntPtrT>(Descriptor::kArgument);
 
   Return(BigIntFromInt64(argument));
 }
@@ -66,8 +67,8 @@ TF_BUILTIN(I32PairToBigInt, CodeStubAssembler) {
     return;
   }
 
-  TNode<IntPtrT> low = UncheckedCast<IntPtrT>(Parameter(Descriptor::kLow));
-  TNode<IntPtrT> high = UncheckedCast<IntPtrT>(Parameter(Descriptor::kHigh));
+  auto low = UncheckedParameter<IntPtrT>(Descriptor::kLow);
+  auto high = UncheckedParameter<IntPtrT>(Descriptor::kHigh);
 
   Return(BigIntFromInt32Pair(low, high));
 }

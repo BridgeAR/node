@@ -20,20 +20,40 @@
 
 namespace U_ICU_NAMESPACE {
 class Locale;
-}
+}  // namespace U_ICU_NAMESPACE
 
 namespace v8 {
 namespace internal {
 
-class JSLocale : public JSObject {
+#include "torque-generated/src/objects/js-locale-tq.inc"
+
+class JSLocale : public TorqueGeneratedJSLocale<JSLocale, JSObject> {
  public:
   // Creates locale object with properties derived from input locale string
   // and options.
   static MaybeHandle<JSLocale> New(Isolate* isolate, Handle<Map> map,
                                    Handle<String> locale,
                                    Handle<JSReceiver> options);
-  static Handle<String> Maximize(Isolate* isolate, String locale);
-  static Handle<String> Minimize(Isolate* isolate, String locale);
+
+  static MaybeHandle<JSLocale> Maximize(Isolate* isolate,
+                                        Handle<JSLocale> locale);
+  static MaybeHandle<JSLocale> Minimize(Isolate* isolate,
+                                        Handle<JSLocale> locale);
+
+  V8_WARN_UNUSED_RESULT static MaybeHandle<JSArray> GetCalendars(
+      Isolate* isolate, Handle<JSLocale> locale);
+  V8_WARN_UNUSED_RESULT static MaybeHandle<JSArray> GetCollations(
+      Isolate* isolate, Handle<JSLocale> locale);
+  V8_WARN_UNUSED_RESULT static MaybeHandle<JSArray> GetHourCycles(
+      Isolate* isolate, Handle<JSLocale> locale);
+  V8_WARN_UNUSED_RESULT static MaybeHandle<JSArray> GetNumberingSystems(
+      Isolate* isolate, Handle<JSLocale> locale);
+  V8_WARN_UNUSED_RESULT static MaybeHandle<JSObject> GetTextInfo(
+      Isolate* isolate, Handle<JSLocale> locale);
+  V8_WARN_UNUSED_RESULT static MaybeHandle<Object> GetTimeZones(
+      Isolate* isolate, Handle<JSLocale> locale);
+  V8_WARN_UNUSED_RESULT static MaybeHandle<JSObject> GetWeekInfo(
+      Isolate* isolate, Handle<JSLocale> locale);
 
   static Handle<Object> Language(Isolate* isolate, Handle<JSLocale> locale);
   static Handle<Object> Script(Isolate* isolate, Handle<JSLocale> locale);
@@ -59,18 +79,11 @@ class JSLocale : public JSObject {
   // Help function to check well-formed "3alpha"
   static bool Is3Alpha(const std::string& value);
 
-  DECL_CAST(JSLocale)
-
-  DECL_ACCESSORS(icu_locale, Managed<icu::Locale>)
+  DECL_ACCESSORS(icu_locale, Tagged<Managed<icu::Locale>>)
 
   DECL_PRINTER(JSLocale)
-  DECL_VERIFIER(JSLocale)
 
-  // Layout description.
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                TORQUE_GENERATED_JS_LOCALE_FIELDS)
-
-  OBJECT_CONSTRUCTORS(JSLocale, JSObject);
+  TQ_OBJECT_CONSTRUCTORS(JSLocale)
 };
 
 }  // namespace internal

@@ -1,6 +1,6 @@
 // Flags: --experimental-vm-modules --expose-internals
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const { types, inspect } = require('util');
 const vm = require('vm');
@@ -73,7 +73,7 @@ for (const [ value, _method ] of [
   new Number(),
   new String(),
   Object(Symbol()),
-  Object(BigInt(0))
+  Object(BigInt(0)),
 ].forEach((entry) => assert(types.isBoxedPrimitive(entry)));
 
 {
@@ -132,19 +132,19 @@ for (const [ value, _method ] of [
   const bigInt64Array = new BigInt64Array(arrayBuffer);
   const bigUint64Array = new BigUint64Array(arrayBuffer);
 
-  const fakeBuffer = Object.create(Buffer.prototype);
-  const fakeDataView = Object.create(DataView.prototype);
-  const fakeUint8Array = Object.create(Uint8Array.prototype);
-  const fakeUint8ClampedArray = Object.create(Uint8ClampedArray.prototype);
-  const fakeUint16Array = Object.create(Uint16Array.prototype);
-  const fakeUint32Array = Object.create(Uint32Array.prototype);
-  const fakeInt8Array = Object.create(Int8Array.prototype);
-  const fakeInt16Array = Object.create(Int16Array.prototype);
-  const fakeInt32Array = Object.create(Int32Array.prototype);
-  const fakeFloat32Array = Object.create(Float32Array.prototype);
-  const fakeFloat64Array = Object.create(Float64Array.prototype);
-  const fakeBigInt64Array = Object.create(BigInt64Array.prototype);
-  const fakeBigUint64Array = Object.create(BigUint64Array.prototype);
+  const fakeBuffer = { __proto__: Buffer.prototype };
+  const fakeDataView = { __proto__: DataView.prototype };
+  const fakeUint8Array = { __proto__: Uint8Array.prototype };
+  const fakeUint8ClampedArray = { __proto__: Uint8ClampedArray.prototype };
+  const fakeUint16Array = { __proto__: Uint16Array.prototype };
+  const fakeUint32Array = { __proto__: Uint32Array.prototype };
+  const fakeInt8Array = { __proto__: Int8Array.prototype };
+  const fakeInt16Array = { __proto__: Int16Array.prototype };
+  const fakeInt32Array = { __proto__: Int32Array.prototype };
+  const fakeFloat32Array = { __proto__: Float32Array.prototype };
+  const fakeFloat64Array = { __proto__: Float64Array.prototype };
+  const fakeBigInt64Array = { __proto__: BigInt64Array.prototype };
+  const fakeBigUint64Array = { __proto__: BigUint64Array.prototype };
 
   const stealthyDataView =
     Object.setPrototypeOf(new DataView(arrayBuffer), Uint8Array.prototype);
@@ -194,7 +194,7 @@ for (const [ value, _method ] of [
     float32Array, fakeFloat32Array, stealthyFloat32Array,
     float64Array, fakeFloat64Array, stealthyFloat64Array,
     bigInt64Array, fakeBigInt64Array, stealthyBigInt64Array,
-    bigUint64Array, fakeBigUint64Array, stealthyBigUint64Array
+    bigUint64Array, fakeBigUint64Array, stealthyBigUint64Array,
   ];
 
   const expected = {
@@ -211,7 +211,7 @@ for (const [ value, _method ] of [
       float32Array, stealthyFloat32Array,
       float64Array, stealthyFloat64Array,
       bigInt64Array, stealthyBigInt64Array,
-      bigUint64Array, stealthyBigUint64Array
+      bigUint64Array, stealthyBigUint64Array,
     ],
     isTypedArray: [
       buffer,
@@ -225,40 +225,40 @@ for (const [ value, _method ] of [
       float32Array, stealthyFloat32Array,
       float64Array, stealthyFloat64Array,
       bigInt64Array, stealthyBigInt64Array,
-      bigUint64Array, stealthyBigUint64Array
+      bigUint64Array, stealthyBigUint64Array,
     ],
     isUint8Array: [
-      buffer, uint8Array, stealthyUint8Array
+      buffer, uint8Array, stealthyUint8Array,
     ],
     isUint8ClampedArray: [
-      uint8ClampedArray, stealthyUint8ClampedArray
+      uint8ClampedArray, stealthyUint8ClampedArray,
     ],
     isUint16Array: [
-      uint16Array, stealthyUint16Array
+      uint16Array, stealthyUint16Array,
     ],
     isUint32Array: [
-      uint32Array, stealthyUint32Array
+      uint32Array, stealthyUint32Array,
     ],
     isInt8Array: [
-      int8Array, stealthyInt8Array
+      int8Array, stealthyInt8Array,
     ],
     isInt16Array: [
-      int16Array, stealthyInt16Array
+      int16Array, stealthyInt16Array,
     ],
     isInt32Array: [
-      int32Array, stealthyInt32Array
+      int32Array, stealthyInt32Array,
     ],
     isFloat32Array: [
-      float32Array, stealthyFloat32Array
+      float32Array, stealthyFloat32Array,
     ],
     isFloat64Array: [
-      float64Array, stealthyFloat64Array
+      float64Array, stealthyFloat64Array,
     ],
     isBigInt64Array: [
-      bigInt64Array, stealthyBigInt64Array
+      bigInt64Array, stealthyBigInt64Array,
     ],
     isBigUint64Array: [
-      bigUint64Array, stealthyBigUint64Array
+      bigUint64Array, stealthyBigUint64Array,
     ]
   };
 
@@ -280,4 +280,14 @@ for (const [ value, _method ] of [
   await m.link(() => 0);
   await m.evaluate();
   assert.ok(types.isModuleNamespaceObject(m.namespace));
-})();
+})().then(common.mustCall());
+
+{
+  // eslint-disable-next-line node-core/crypto-check
+  if (common.hasCrypto) {
+    const crypto = require('crypto');
+    assert.ok(!types.isKeyObject(crypto.createHash('sha1')));
+  }
+  assert.ok(!types.isCryptoKey());
+  assert.ok(!types.isKeyObject());
+}

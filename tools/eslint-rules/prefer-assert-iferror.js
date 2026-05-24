@@ -8,6 +8,9 @@
 const utils = require('./rules-utils.js');
 
 module.exports = {
+  meta: {
+    fixable: 'code',
+  },
   create(context) {
     const sourceCode = context.getSourceCode();
     let assertImported = false;
@@ -49,13 +52,13 @@ module.exports = {
               if (assertImported) {
                 return fixer.replaceText(
                   node,
-                  `assert.ifError(${argument});`
+                  `assert.ifError(${argument});`,
                 );
               }
-            }
+            },
           });
         }
-      }
+      },
     };
-  }
+  },
 };

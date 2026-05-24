@@ -16,8 +16,6 @@
 #include "src/compiler/raw-machine-assembler.h"
 #include "src/compiler/wasm-compiler.h"
 #include "src/execution/simulator.h"
-#include "src/objects/objects-inl.h"
-#include "src/objects/objects.h"
 #include "src/wasm/wasm-engine.h"
 #include "src/wasm/wasm-features.h"
 #include "src/wasm/wasm-limits.h"
@@ -107,7 +105,7 @@ Node* ToInt32(RawMachineAssembler* m, MachineType type, Node* a) {
     case MachineRepresentation::kWord64:
       return m->TruncateInt64ToInt32(a);
     case MachineRepresentation::kFloat32:
-      return m->TruncateFloat32ToInt32(a);
+      return m->TruncateFloat32ToInt32(a, TruncateKind::kArchitectureDefault);
     case MachineRepresentation::kFloat64:
       return m->RoundFloat64ToInt32(a);
     default:
@@ -136,13 +134,13 @@ CallDescriptor* CreateRandomCallDescriptor(Zone* zone, size_t return_count,
 
 std::shared_ptr<wasm::NativeModule> AllocateNativeModule(i::Isolate* isolate,
                                                          size_t code_size) {
-  std::shared_ptr<wasm::WasmModule> module(new wasm::WasmModule);
+  auto module = std::make_shared<wasm::WasmModule>(wasm::kWasmOrigin);
   module->num_declared_functions = 1;
 
   // We have to add the code object to a NativeModule, because the
   // WasmCallDescriptor assumes that code is on the native heap and not
   // within a code object.
-  auto native_module = isolate->wasm_engine()->NewNativeModule(
+  auto native_module = wasm::GetWasmEngine()->NewNativeModule(
       isolate, i::wasm::WasmFeatures::All(), std::move(module), code_size);
   native_module->SetWireBytes({});
   return native_module;
@@ -162,15 +160,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   InputProvider input(data, size);
   // Create randomized descriptor.
   size_t param_count = input.NumNonZeroBytes(0, kNumTypes);
-  if (param_count > Code::kMaxArguments) return 0;
+  if (param_count > wasm::kV8MaxWasmFunctionParams) return 0;
 
   size_t return_count = input.NumNonZeroBytes(param_count + 1, kNumTypes);
-  if (return_count > wasm::kV8MaxWasmFunctionMultiReturns) return 0;
+  if (return_count > wasm::kV8MaxWasmFunctionReturns) return 0;
 
   CallDescriptor* desc =
       CreateRandomCallDescriptor(&zone, return_count, param_count, &input);
 
-  if (FLAG_wasm_fuzzer_gen_test) {
+  if (v8_flags.wasm_fuzzer_gen_test) {
     // Print some debugging output which describes the produced signature.
     printf("[");
     for (size_t j = 0; j < param_count; ++j) {
@@ -206,7 +204,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
 
   RawMachineAssembler callee(
-      i_isolate, new (&zone) Graph(&zone), desc,
+      i_isolate, zone.New<Graph>(&zone), desc,
       MachineType::PointerRepresentation(),
       InstructionSelector::SupportedMachineOperatorFlags());
 
@@ -239,7 +237,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
   callee.Return(static_cast<int>(desc->ReturnCount()), returns.get());
 
-  OptimizedCompilationInfo info(ArrayVector("testing"), &zone, Code::STUB);
+  OptimizedCompilationInfo info(base::ArrayVector("testing"), &zone,
+                                CodeKind::FOR_TESTING);
   Handle<Code> code =
       Pipeline::GenerateCodeForTesting(&info, i_isolate, desc, callee.graph(),
                                        AssemblerOptions::Default(i_isolate),
@@ -247,9 +246,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
           .ToHandleChecked();
 
   std::shared_ptr<wasm::NativeModule> module =
-      AllocateNativeModule(i_isolate, code->raw_instruction_size());
+      AllocateNativeModule(i_isolate, code->instruction_size());
   wasm::WasmCodeRefScope wasm_code_ref_scope;
-  byte* code_start = module->AddCodeForTesting(code)->instructions().begin();
+  uint8_t* code_start = module->AddCodeForTesting(code)->instructions().begin();
   // Generate wrapper.
   int expect = 0;
 
@@ -259,7 +258,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   CallDescriptor* wrapper_desc =
       Linkage::GetSimplifiedCDescriptor(&zone, sig_builder.Build());
   RawMachineAssembler caller(
-      i_isolate, new (&zone) Graph(&zone), wrapper_desc,
+      i_isolate, zone.New<Graph>(&zone), wrapper_desc,
       MachineType::PointerRepresentation(),
       InstructionSelector::SupportedMachineOperatorFlags());
 
@@ -284,15 +283,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   caller.Return(ret);
 
   // Call the wrapper.
-  OptimizedCompilationInfo wrapper_info(ArrayVector("wrapper"), &zone,
-                                        Code::STUB);
+  OptimizedCompilationInfo wrapper_info(base::ArrayVector("wrapper"), &zone,
+                                        CodeKind::FOR_TESTING);
   Handle<Code> wrapper_code =
       Pipeline::GenerateCodeForTesting(
           &wrapper_info, i_isolate, wrapper_desc, caller.graph(),
           AssemblerOptions::Default(i_isolate), caller.ExportForTest())
           .ToHandleChecked();
 
-  auto fn = GeneratedCode<int32_t>::FromCode(*wrapper_code);
+  auto fn = GeneratedCode<int32_t>::FromCode(i_isolate, *wrapper_code);
   int result = fn.Call();
 
   CHECK_EQ(expect, result);

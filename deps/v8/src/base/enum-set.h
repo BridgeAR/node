@@ -5,8 +5,10 @@
 #ifndef V8_BASE_ENUM_SET_H_
 #define V8_BASE_ENUM_SET_H_
 
+#include <ostream>
 #include <type_traits>
 
+#include "src/base/bits.h"
 #include "src/base/logging.h"
 
 namespace v8 {
@@ -21,37 +23,59 @@ class EnumSet {
  public:
   constexpr EnumSet() = default;
 
-  explicit constexpr EnumSet(std::initializer_list<E> init) {
+  constexpr EnumSet(std::initializer_list<E> init) {
     T bits = 0;
     for (E e : init) bits |= Mask(e);
     bits_ = bits;
   }
 
-  bool empty() const { return bits_ == 0; }
-  bool contains(E element) const { return (bits_ & Mask(element)) != 0; }
-  bool contains_any(EnumSet set) const { return (bits_ & set.bits_) != 0; }
+  constexpr bool empty() const { return bits_ == 0; }
+  constexpr bool contains(E element) const {
+    return (bits_ & Mask(element)) != 0;
+  }
+  constexpr bool contains_any(EnumSet set) const {
+    return (bits_ & set.bits_) != 0;
+  }
+  constexpr bool contains_only(E element) const {
+    return bits_ == Mask(element);
+  }
+  constexpr bool is_subset_of(EnumSet set) const {
+    return (bits_ & set.bits_) == bits_;
+  }
   void Add(E element) { bits_ |= Mask(element); }
   void Add(EnumSet set) { bits_ |= set.bits_; }
   void Remove(E element) { bits_ &= ~Mask(element); }
   void Remove(EnumSet set) { bits_ &= ~set.bits_; }
   void RemoveAll() { bits_ = 0; }
   void Intersect(EnumSet set) { bits_ &= set.bits_; }
-  T ToIntegral() const { return bits_; }
+  constexpr T ToIntegral() const { return bits_; }
 
-  bool operator==(EnumSet set) const { return bits_ == set.bits_; }
-  bool operator!=(EnumSet set) const { return bits_ != set.bits_; }
+  constexpr bool operator==(EnumSet set) const { return bits_ == set.bits_; }
+  constexpr bool operator!=(EnumSet set) const { return bits_ != set.bits_; }
 
-  EnumSet operator|(EnumSet set) const { return EnumSet(bits_ | set.bits_); }
-  EnumSet operator&(EnumSet set) const { return EnumSet(bits_ & set.bits_); }
-  EnumSet operator-(EnumSet set) const { return EnumSet(bits_ & ~set.bits_); }
+  constexpr EnumSet operator|(EnumSet set) const {
+    return EnumSet(bits_ | set.bits_);
+  }
+  constexpr EnumSet operator&(EnumSet set) const {
+    return EnumSet(bits_ & set.bits_);
+  }
+  constexpr EnumSet operator-(EnumSet set) const {
+    return EnumSet(bits_ & ~set.bits_);
+  }
 
   EnumSet& operator|=(EnumSet set) { return *this = *this | set; }
   EnumSet& operator&=(EnumSet set) { return *this = *this & set; }
   EnumSet& operator-=(EnumSet set) { return *this = *this - set; }
 
-  EnumSet operator|(E element) const { return EnumSet(bits_ | Mask(element)); }
-  EnumSet operator&(E element) const { return EnumSet(bits_ & Mask(element)); }
-  EnumSet operator-(E element) const { return EnumSet(bits_ & ~Mask(element)); }
+  constexpr EnumSet operator|(E element) const {
+    return EnumSet(bits_ | Mask(element));
+  }
+  constexpr EnumSet operator&(E element) const {
+    return EnumSet(bits_ & Mask(element));
+  }
+  constexpr EnumSet operator-(E element) const {
+    return EnumSet(bits_ & ~Mask(element));
+  }
 
   EnumSet& operator|=(E element) { return *this = *this | element; }
   EnumSet& operator&=(E element) { return *this = *this & element; }
@@ -63,14 +87,29 @@ class EnumSet {
   explicit constexpr EnumSet(T bits) : bits_(bits) {}
 
   static constexpr T Mask(E element) {
-#if V8_HAS_CXX14_CONSTEXPR
-    DCHECK_GT(sizeof(T) * 8, static_cast<int>(element));
-#endif
+    DCHECK_GT(sizeof(T) * 8, static_cast<size_t>(element));
     return T{1} << static_cast<typename std::underlying_type<E>::type>(element);
   }
 
   T bits_ = 0;
 };
+
+template <typename E, typename T>
+std::ostream& operator<<(std::ostream& os, EnumSet<E, T> set) {
+  os << "{";
+  bool first = true;
+  while (!set.empty()) {
+    if (!first) os << ", ";
+    first = false;
+
+    T bits = set.ToIntegral();
+    E element = static_cast<E>(bits::CountTrailingZerosNonZero(bits));
+    os << element;
+    set.Remove(element);
+  }
+  os << "}";
+  return os;
+}
 
 }  // namespace base
 }  // namespace v8
