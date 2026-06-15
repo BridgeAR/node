@@ -902,6 +902,14 @@ BaseObjectPtr<Http2Stream> Http2Session::RemoveStream(int32_t id) {
   stream = FindStream(id);
   if (stream) {
     streams_.erase(id);
+    if (stream->current_headers_length_ > 0) {
+      DecrementCurrentSessionMemory(stream->current_headers_length_);
+      stream->current_headers_length_ = 0;
+    }
+    if (stream->retained_headers_length_ > 0) {
+      DecrementCurrentSessionMemory(stream->retained_headers_length_);
+      stream->retained_headers_length_ = 0;
+    }
     DecrementCurrentSessionMemory(sizeof(*stream));
   }
   return stream;
@@ -1100,6 +1108,16 @@ int Http2Session::OnFrameReceive(nghttp2_session* handle,
       // Intentional fall-through, handled just like headers frames
     case NGHTTP2_HEADERS:
       session->HandleHeadersFrame(frame);
+      break;
+    case NGHTTP2_RST_STREAM:
+      // Stamp the stream so JS onStreamClose can tell a peer reset apart
+      // from a clean close — both surface as on_stream_close, and a peer
+      // RST_STREAM(NO_ERROR) is otherwise indistinguishable from a natural
+      // close at the on_stream_close layer.
+      if (BaseObjectPtr<Http2Stream> stream =
+              session->FindStream(frame->hd.stream_id)) {
+        stream->set_peer_reset();
+      }
       break;
     case NGHTTP2_SETTINGS:
       session->HandleSettingsFrame(frame);
@@ -1310,9 +1328,12 @@ int Http2Session::OnStreamClose(nghttp2_session* handle,
   // ever passed on to the javascript side. If that happens, the callback
   // will return false.
   if (env->can_call_into_js()) {
-    Local<Value> arg = Integer::NewFromUnsigned(isolate, code);
+    Local<Value> argv[2] = {
+        Integer::NewFromUnsigned(isolate, code),
+        Boolean::New(isolate, stream->peer_reset()),
+    };
     MaybeLocal<Value> answer = stream->MakeCallback(
-        env->http2session_on_stream_close_function(), 1, &arg);
+        env->http2session_on_stream_close_function(), arraysize(argv), argv);
     if (answer.IsEmpty() || answer.ToLocalChecked()->IsFalse()) {
       // Skip to destroy
       stream->Destroy();
@@ -1548,7 +1569,10 @@ void Http2Session::HandleHeadersFrame(const nghttp2_frame* frame) {
   });
   CHECK_EQ(stream->headers_count(), 0);
 
-  DecrementCurrentSessionMemory(stream->current_headers_length_);
+  // Keep the header block charged against maxSessionMemory while the
+  // corresponding JS objects can still keep it alive for the lifetime of
+  // the stream.
+  stream->retained_headers_length_ += stream->current_headers_length_;
   stream->current_headers_length_ = 0;
 
   Local<Value> args[] = {

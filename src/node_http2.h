@@ -65,6 +65,7 @@ constexpr int kStreamStateReadPaused = 0x4;
 constexpr int kStreamStateClosed = 0x8;
 constexpr int kStreamStateDestroyed = 0x10;
 constexpr int kStreamStateTrailers = 0x20;
+constexpr int kStreamStatePeerReset = 0x40;
 
 // Http2Session internal states
 constexpr int kSessionStateNone = 0x0;
@@ -347,6 +348,15 @@ class Http2Stream : public AsyncWrap,
     return flags_ & kStreamStateClosed;
   }
 
+  // True iff a RST_STREAM frame was received from the peer for this stream.
+  // Set by Http2Session::OnFrameReceive on NGHTTP2_RST_STREAM. Used by JS
+  // onStreamClose to distinguish a peer-initiated reset from a clean
+  // bidirectional END_STREAM exchange (both surface to JS with the same
+  // nghttp2 close code when the peer sent RST_STREAM(NO_ERROR)).
+  bool peer_reset() const { return flags_ & kStreamStatePeerReset; }
+
+  void set_peer_reset() { flags_ |= kStreamStatePeerReset; }
+
   bool has_trailers() const {
     return flags_ & kStreamStateTrailers;
   }
@@ -490,9 +500,11 @@ class Http2Stream : public AsyncWrap,
 
   // The Current Headers block... As headers are received for this stream,
   // they are temporarily stored here until the OnFrameReceived is called
-  // signalling the end of the HEADERS frame
+  // signalling the end of the HEADERS frame.
   nghttp2_headers_category current_headers_category_ = NGHTTP2_HCAT_HEADERS;
   uint32_t current_headers_length_ = 0;  // total number of octets
+  // Charged against maxSessionMemory while headers stay alive in JS.
+  uint64_t retained_headers_length_ = 0;
   std::vector<Http2Header> current_headers_;
 
   // This keeps track of the amount of data read from the socket while the

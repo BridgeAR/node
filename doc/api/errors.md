@@ -1718,6 +1718,15 @@ Use of the `101` Informational status code is forbidden in HTTP/2.
 An invalid HTTP status code has been specified. Status codes must be an integer
 between `100` and `599` (inclusive).
 
+<a id="ERR_HTTP2_STREAM_ABORTED"></a>
+
+### `ERR_HTTP2_STREAM_ABORTED`
+
+The peer reset the `Http2Stream` with a clean error code (`NGHTTP2_NO_ERROR`
+or `NGHTTP2_CANCEL`) before sending `END_STREAM`, so the readable side will
+not be fully delivered. Mirrors HTTP/1's `ECONNRESET` for a peer-side
+`socket.destroy()`.
+
 <a id="ERR_HTTP2_STREAM_CANCEL"></a>
 
 ### `ERR_HTTP2_STREAM_CANCEL`
@@ -2525,6 +2534,77 @@ A given value is out of the accepted range.
 
 The `package.json` [`"imports"`][] field does not define the given internal
 package specifier mapping.
+
+<a id="ERR_PACKAGE_MAP_EXTERNAL_FILE"></a>
+
+### `ERR_PACKAGE_MAP_EXTERNAL_FILE`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+A module attempted to resolve a bare specifier using the [package map][], but
+the importing file is not located within any package defined in the map.
+
+```console
+$ node --experimental-package-map=./package-map.json /tmp/script.js
+Error [ERR_PACKAGE_MAP_EXTERNAL_FILE]: Cannot resolve "dep-a" from "/tmp/script.js": file is not within any package defined in /path/to/package-map.json
+```
+
+To fix this error, ensure the importing file is inside one of the package
+directories listed in the package map, or add a new package entry whose `url`
+covers the importing file.
+
+<a id="ERR_PACKAGE_MAP_INVALID"></a>
+
+### `ERR_PACKAGE_MAP_INVALID`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+The [package map][] configuration file is invalid. This can occur when:
+
+* The file does not exist at the specified path.
+* The file contains invalid JSON.
+* The file is missing the required `packages` object.
+* A package entry is missing the required `url` field.
+* Two package entries have the same `url` value.
+
+```console
+$ node --experimental-package-map=./missing.json app.js
+Error [ERR_PACKAGE_MAP_INVALID]: Invalid package map at "./missing.json": file not found
+```
+
+<a id="ERR_PACKAGE_MAP_KEY_NOT_FOUND"></a>
+
+### `ERR_PACKAGE_MAP_KEY_NOT_FOUND`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+A package's `dependencies` object in the [package map][] references a package
+key that is not defined in the `packages` object.
+
+```json
+{
+  "packages": {
+    "app": {
+      "url": "./app",
+      "dependencies": {
+        "foo": "nonexistent"
+      }
+    }
+  }
+}
+```
+
+In this example, `"nonexistent"` is referenced as a dependency target but not
+defined in `packages`, which will throw this error.
+
+To fix this error, ensure all package keys referenced in `dependencies` values
+are defined in the `packages` object.
 
 <a id="ERR_PACKAGE_PATH_NOT_EXPORTED"></a>
 
@@ -4550,6 +4630,7 @@ An error occurred trying to allocate memory. This should never happen.
 [domains]: domain.md
 [event emitter-based]: events.md#class-eventemitter
 [file descriptors]: https://en.wikipedia.org/wiki/File_descriptor
+[package map]: packages.md#package-maps
 [relative URL]: https://url.spec.whatwg.org/#relative-url-string
 [self-reference a package using its name]: packages.md#self-referencing-a-package-using-its-name
 [special scheme]: https://url.spec.whatwg.org/#special-scheme
