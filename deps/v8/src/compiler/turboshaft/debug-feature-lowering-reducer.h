@@ -7,8 +7,10 @@
 
 #include "src/compiler/js-heap-broker.h"
 #include "src/compiler/turboshaft/assembler.h"
+#include "src/compiler/turboshaft/builtin-call-descriptors.h"
 #include "src/compiler/turboshaft/index.h"
 #include "src/compiler/turboshaft/operations.h"
+#include "src/compiler/turboshaft/phase.h"
 #include "src/compiler/turboshaft/representations.h"
 
 namespace v8::internal::compiler::turboshaft {
@@ -18,17 +20,51 @@ namespace v8::internal::compiler::turboshaft {
 template <typename Next>
 class DebugFeatureLoweringReducer : public Next {
  public:
-  TURBOSHAFT_REDUCER_BOILERPLATE()
+  TURBOSHAFT_REDUCER_BOILERPLATE(DebugFeatureLowering)
+  using StringOrSmi = Union<String, Smi>;
 
-  OpIndex REDUCE(DebugPrint)(OpIndex input, RegisterRepresentation rep) {
+  template <typename Desc>
+  void CallDebugPrint(OptionalV<String> label, OpIndex value) {
+    if (isolate_) {
+      typename Desc::Arguments args;
+      if (label.has_value()) {
+        args.label_or_0 = label.value();
+      } else {
+        args.label_or_0 = __ SmiZeroConstant();
+      }
+      args.value = value;
+      __ template CallBuiltin<Desc>(__ NoContextConstant(), args);
+    } else {
+#if V8_ENABLE_WEBASSEMBLY
+      DCHECK(__ data()->is_wasm());
+      DCHECK(
+          !label.has_value());  // String constants are not supported in wasm.
+      __ template WasmCallBuiltinThroughJumptable<Desc>(
+          __ NoContextConstant(),
+          {.label_or_0 = __ SmiZeroConstant(), .value = value});
+#else
+      UNREACHABLE();
+#endif
+    }
+  }
+
+  OpIndex REDUCE(DebugPrint)(OpIndex input, OptionalV<String> label,
+                             RegisterRepresentation rep) {
     switch (rep.value()) {
-      case RegisterRepresentation::PointerSized():
-        __ CallBuiltin_DebugPrintWordPtr(isolate_, __ NoContextConstant(),
-                                         input);
+      case RegisterRepresentation::Word32():
+        CallDebugPrint<builtin::DebugPrintWord32>(label, input);
+        break;
+      case RegisterRepresentation::Word64():
+        CallDebugPrint<builtin::DebugPrintWord64>(label, input);
+        break;
+      case RegisterRepresentation::Float32():
+        CallDebugPrint<builtin::DebugPrintFloat32>(label, input);
         break;
       case RegisterRepresentation::Float64():
-        __ CallBuiltin_DebugPrintFloat64(isolate_, __ NoContextConstant(),
-                                         input);
+        CallDebugPrint<builtin::DebugPrintFloat64>(label, input);
+        break;
+      case RegisterRepresentation::Tagged():
+        CallDebugPrint<builtin::DebugPrintObject>(label, input);
         break;
       default:
         // TODO(nicohartmann@): Support other representations.
@@ -37,7 +73,7 @@ class DebugFeatureLoweringReducer : public Next {
     return {};
   }
 
-  OpIndex REDUCE(StaticAssert)(OpIndex condition, const char* source) {
+  V<None> REDUCE(StaticAssert)(V<Word32> condition, const char* source) {
     // Static asserts should be (statically asserted and) removed by turboshaft.
     UnparkedScopeIfNeeded scope(broker_);
     AllowHandleDereference allow_handle_dereference;
@@ -61,8 +97,8 @@ class DebugFeatureLoweringReducer : public Next {
   }
 
  private:
-  Isolate* isolate_ = PipelineData::Get().isolate();
-  JSHeapBroker* broker_ = PipelineData::Get().broker();
+  Isolate* isolate_ = __ data() -> isolate();
+  JSHeapBroker* broker_ = __ data() -> broker();
 };
 
 #include "src/compiler/turboshaft/undef-assembler-macros.inc"

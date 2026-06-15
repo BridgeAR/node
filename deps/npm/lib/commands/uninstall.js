@@ -1,10 +1,10 @@
-const { resolve } = require('path')
+const { resolve } = require('node:path')
 const pkgJson = require('@npmcli/package-json')
-
 const reifyFinish = require('../utils/reify-finish.js')
-const completion = require('../utils/completion/installed-shallow.js')
-
+const resolveAllowScripts = require('../utils/resolve-allow-scripts.js')
+const completion = require('../utils/installed-shallow.js')
 const ArboristWorkspaceCmd = require('../arborist-cmd.js')
+
 class Uninstall extends ArboristWorkspaceCmd {
   static description = 'Remove a package'
   static name = 'uninstall'
@@ -12,8 +12,6 @@ class Uninstall extends ArboristWorkspaceCmd {
   static usage = ['[<@scope>/]<pkg>...']
   static ignoreImplicitWorkspace = false
 
-  // TODO
-  /* istanbul ignore next */
   static async completion (opts, npm) {
     return completion(npm, opts)
   }
@@ -42,15 +40,18 @@ class Uninstall extends ArboristWorkspaceCmd {
       : this.npm.localPrefix
 
     const Arborist = require('@npmcli/arborist')
+    const { policy: allowScriptsPolicy } = await resolveAllowScripts(this.npm)
     const opts = {
       ...this.npm.flatOptions,
       path,
       rm: args,
       workspaces: this.workspaceNames,
+      allowScripts: allowScriptsPolicy,
     }
     const arb = new Arborist(opts)
     await arb.reify(opts)
     await reifyFinish(this.npm, arb)
   }
 }
+
 module.exports = Uninstall

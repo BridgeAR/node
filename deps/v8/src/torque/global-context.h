@@ -18,6 +18,28 @@ namespace v8 {
 namespace internal {
 namespace torque {
 
+struct CppInclude {
+  std::string include_path;
+  IncludeSelector include_selector;
+
+  bool csa_selected() const {
+    return include_selector == IncludeSelector::kCSA ||
+           include_selector == IncludeSelector::kAny;
+  }
+
+  bool tsa_selected() const {
+    return include_selector == IncludeSelector::kTSA ||
+           include_selector == IncludeSelector::kAny;
+  }
+};
+
+inline bool operator<(const CppInclude& lhs, const CppInclude& rhs) {
+  if (lhs.include_path == rhs.include_path) {
+    return lhs.include_selector < rhs.include_selector;
+  }
+  return lhs.include_path < rhs.include_path;
+}
+
 class GlobalContext : public base::ContextualClass<GlobalContext> {
  public:
   GlobalContext(GlobalContext&&) V8_NOEXCEPT = default;
@@ -36,10 +58,12 @@ class GlobalContext : public base::ContextualClass<GlobalContext> {
     return Get().declarables_;
   }
 
-  static void AddCppInclude(std::string include_path) {
-    Get().cpp_includes_.insert(std::move(include_path));
+  static void AddCppInclude(std::string include_path,
+                            IncludeSelector include_selector) {
+    Get().cpp_includes_.insert(
+        CppInclude(std::move(include_path), include_selector));
   }
-  static const std::set<std::string>& CppIncludes() {
+  static const std::set<CppInclude>& CppIncludes() {
     return Get().cpp_includes_;
   }
 
@@ -112,10 +136,22 @@ class GlobalContext : public base::ContextualClass<GlobalContext> {
     if (c.macros_for_cc_output_set_.insert(item).second) {
       c.macros_for_cc_output_.push_back(item);
     }
+    EnsureInCCDebugOutputList(macro, source);
   }
   static const std::vector<std::pair<TorqueMacro*, SourceId>>&
   AllMacrosForCCOutput() {
     return Get().macros_for_cc_output_;
+  }
+  static void EnsureInCCDebugOutputList(TorqueMacro* macro, SourceId source) {
+    GlobalContext& c = Get();
+    auto item = std::make_pair(macro, source);
+    if (c.macros_for_cc_debug_output_set_.insert(item).second) {
+      c.macros_for_cc_debug_output_.push_back(item);
+    }
+  }
+  static const std::vector<std::pair<TorqueMacro*, SourceId>>&
+  AllMacrosForCCDebugOutput() {
+    return Get().macros_for_cc_debug_output_;
   }
 
  private:
@@ -126,11 +162,13 @@ class GlobalContext : public base::ContextualClass<GlobalContext> {
   Namespace* default_namespace_;
   Ast ast_;
   std::vector<std::unique_ptr<Declarable>> declarables_;
-  std::set<std::string> cpp_includes_;
+  std::set<CppInclude> cpp_includes_;
   std::map<SourceId, PerFileStreams> generated_per_file_;
   std::map<std::string, size_t> fresh_ids_;
   std::vector<std::pair<TorqueMacro*, SourceId>> macros_for_cc_output_;
   std::set<std::pair<TorqueMacro*, SourceId>> macros_for_cc_output_set_;
+  std::vector<std::pair<TorqueMacro*, SourceId>> macros_for_cc_debug_output_;
+  std::set<std::pair<TorqueMacro*, SourceId>> macros_for_cc_debug_output_set_;
   bool instance_types_initialized_ = false;
 
   friend class LanguageServerData;
@@ -148,7 +186,9 @@ class TargetArchitecture : public base::ContextualClass<TargetArchitecture> {
   static size_t TaggedSize() { return Get().tagged_size_; }
   static size_t RawPtrSize() { return Get().raw_ptr_size_; }
   static size_t ExternalPointerSize() { return Get().external_ptr_size_; }
-  static size_t IndirectPointerSize() { return Get().indirect_ptr_size_; }
+  static size_t CppHeapPointerSize() { return Get().cppheap_ptr_size_; }
+  static size_t TrustedPointerSize() { return Get().trusted_ptr_size_; }
+  static size_t ProtectedPointerSize() { return TaggedSize(); }
   static size_t MaxHeapAlignment() { return TaggedSize(); }
   static bool ArePointersCompressed() { return TaggedSize() < RawPtrSize(); }
   static int SmiTagAndShiftSize() { return Get().smi_tag_and_shift_size_; }
@@ -158,7 +198,8 @@ class TargetArchitecture : public base::ContextualClass<TargetArchitecture> {
   const size_t raw_ptr_size_;
   const int smi_tag_and_shift_size_;
   const size_t external_ptr_size_;
-  const size_t indirect_ptr_size_;
+  const size_t cppheap_ptr_size_;
+  const size_t trusted_ptr_size_;
 };
 
 }  // namespace torque

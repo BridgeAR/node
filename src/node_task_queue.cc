@@ -19,9 +19,7 @@ using v8::FunctionCallbackInfo;
 using v8::Isolate;
 using v8::Just;
 using v8::kPromiseHandlerAddedAfterReject;
-using v8::kPromiseRejectAfterResolved;
 using v8::kPromiseRejectWithNoHandler;
-using v8::kPromiseResolveAfterResolved;
 using v8::Local;
 using v8::Maybe;
 using v8::Number;
@@ -48,12 +46,16 @@ void PromiseRejectCallback(PromiseRejectMessage message) {
   static std::atomic<uint64_t> rejectionsHandledAfter{0};
 
   Local<Promise> promise = message.GetPromise();
-  Isolate* isolate = promise->GetIsolate();
+  Isolate* isolate = Isolate::GetCurrent();
   PromiseRejectEvent event = message.GetEvent();
 
   Environment* env = Environment::GetCurrent(isolate);
 
-  if (env == nullptr || !env->can_call_into_js()) return;
+  if (env == nullptr || !env->can_call_into_js() ||
+      (event != kPromiseRejectWithNoHandler &&
+       event != kPromiseHandlerAddedAfterReject)) {
+    return;
+  }
 
   Local<Function> callback = env->promise_reject_callback();
   // The promise is rejected before JS land calls SetPromiseRejectCallback
@@ -77,10 +79,6 @@ void PromiseRejectCallback(PromiseRejectMessage message) {
                   "rejections",
                   "unhandled", unhandledRejections,
                   "handledAfter", rejectionsHandledAfter);
-  } else if (event == kPromiseResolveAfterResolved) {
-    value = message.GetValue();
-  } else if (event == kPromiseRejectAfterResolved) {
-    value = message.GetValue();
   } else {
     return;
   }
@@ -100,10 +98,11 @@ void PromiseRejectCallback(PromiseRejectMessage message) {
   if (!GetAssignedPromiseAsyncId(env, promise, env->trigger_async_id_symbol())
           .To(&trigger_async_id)) return;
 
+  Local<Object> promise_as_obj = promise;
   if (async_id != AsyncWrap::kInvalidAsyncId &&
       trigger_async_id != AsyncWrap::kInvalidAsyncId) {
     env->async_hooks()->push_async_context(
-        async_id, trigger_async_id, promise);
+        async_id, trigger_async_id, &promise_as_obj);
   }
 
   USE(callback->Call(
@@ -128,8 +127,7 @@ void PromiseRejectCallback(PromiseRejectMessage message) {
 namespace task_queue {
 
 static void EnqueueMicrotask(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-  Isolate* isolate = env->isolate();
+  Isolate* isolate = args.GetIsolate();
 
   CHECK(args[0]->IsFunction());
 
@@ -173,8 +171,6 @@ static void Initialize(Local<Object> target,
   Local<Object> events = Object::New(isolate);
   NODE_DEFINE_CONSTANT(events, kPromiseRejectWithNoHandler);
   NODE_DEFINE_CONSTANT(events, kPromiseHandlerAddedAfterReject);
-  NODE_DEFINE_CONSTANT(events, kPromiseResolveAfterResolved);
-  NODE_DEFINE_CONSTANT(events, kPromiseRejectAfterResolved);
 
   target->Set(env->context(),
               FIXED_ONE_BYTE_STRING(isolate, "promiseRejectEvents"),

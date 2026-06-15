@@ -5,6 +5,7 @@
 #include "src/codegen/assembler-inl.h"
 #include "src/codegen/reloc-info.h"
 #include "src/heap/evacuation-verifier-inl.h"
+#include "src/heap/visit-object.h"
 #include "src/objects/map-inl.h"
 
 namespace v8 {
@@ -16,7 +17,7 @@ EvacuationVerifier::EvacuationVerifier(Heap* heap)
     : ObjectVisitorWithCageBases(heap), heap_(heap) {}
 
 void EvacuationVerifier::Run() {
-  DCHECK(!heap_->sweeping_in_progress());
+  CHECK(!heap_->sweeping_in_progress());
   VerifyRoots();
   VerifyEvacuation(heap_->new_space());
   VerifyEvacuation(heap_->old_space());
@@ -78,7 +79,7 @@ void EvacuationVerifier::VerifyEvacuationOnPage(Address start, Address end) {
   while (current < end) {
     Tagged<HeapObject> object = HeapObject::FromAddress(current);
     if (!IsFreeSpaceOrFiller(object, cage_base())) {
-      object->Iterate(cage_base(), this);
+      VisitObject(heap_->isolate(), object, this);
     }
     current += ALIGN_TO_ALLOCATION_ALIGNMENT(object->Size(cage_base()));
   }
@@ -86,28 +87,20 @@ void EvacuationVerifier::VerifyEvacuationOnPage(Address start, Address end) {
 
 void EvacuationVerifier::VerifyEvacuation(NewSpace* space) {
   if (!space) return;
+
   if (v8_flags.minor_ms) {
     VerifyEvacuation(PagedNewSpace::From(space)->paged_space());
     return;
   }
-  PageRange range(space->first_allocatable_address(), space->top());
-  for (auto it = range.begin(); it != range.end();) {
-    Page* page = *(it++);
-    Address current = page->area_start();
-    Address limit = it != range.end() ? page->area_end() : space->top();
-    CHECK(limit == space->top() || !page->Contains(space->top()));
-    VerifyEvacuationOnPage(current, limit);
+
+  for (NormalPage* p : *space) {
+    VerifyEvacuationOnPage(p->area_start(), p->area_end());
   }
 }
 
 void EvacuationVerifier::VerifyEvacuation(PagedSpaceBase* space) {
-  for (Page* p : *space) {
-    if (p->IsEvacuationCandidate()) continue;
-    if (p->Contains(space->top())) {
-      CodePageMemoryModificationScope memory_modification_scope(p);
-      heap_->CreateFillerObjectAt(
-          space->top(), static_cast<int>(space->limit() - space->top()));
-    }
+  for (NormalPage* p : *space) {
+    if (p->Chunk()->IsEvacuationCandidate()) continue;
     VerifyEvacuationOnPage(p->area_start(), p->area_end());
   }
 }

@@ -7,8 +7,10 @@
 
 #include <type_traits>
 
-#include "src/base/functional.h"
+#include "src/base/hashing.h"
 #include "src/handles/handles.h"
+#include "src/heap/gc-callbacks.h"
+#include "src/heap/heap.h"
 #include "src/objects/tagged.h"
 
 namespace v8 {
@@ -16,6 +18,7 @@ namespace internal {
 
 // Forward declarations.
 class Heap;
+class Isolate;
 class StrongRootsEntry;
 
 template <typename T>
@@ -26,7 +29,7 @@ struct IdentityMapFindResult {
 
 // Base class of identity maps contains shared code for all template
 // instantiations.
-class V8_EXPORT_PRIVATE IdentityMapBase {
+class V8_EXPORT_PRIVATE IdentityMapBase : public GCRootsProvider {
  public:
   IdentityMapBase(const IdentityMapBase&) = delete;
   IdentityMapBase& operator=(const IdentityMapBase&) = delete;
@@ -34,6 +37,7 @@ class V8_EXPORT_PRIVATE IdentityMapBase {
   int size() const { return size_; }
   int capacity() const { return capacity_; }
   bool is_iterable() const { return is_iterable_; }
+  bool IsInvalidatedForTesting() const { return invalidated_; }
 
  protected:
   // Allow Tester to access internals, including changing the address of objects
@@ -44,12 +48,11 @@ class V8_EXPORT_PRIVATE IdentityMapBase {
 
   explicit IdentityMapBase(Heap* heap)
       : heap_(heap),
-        gc_counter_(-1),
+        invalidated_(false),
         size_(0),
         capacity_(0),
         mask_(0),
         keys_(nullptr),
-        strong_roots_entry_(nullptr),
         values_(nullptr),
         is_iterable_(false) {}
   virtual ~IdentityMapBase();
@@ -71,9 +74,17 @@ class V8_EXPORT_PRIVATE IdentityMapBase {
   virtual uintptr_t* NewPointerArray(size_t length, uintptr_t value) = 0;
   virtual void DeletePointerArray(uintptr_t* array, size_t length) = 0;
 
+  // GCRootsProvider implementation.
+  void Iterate(RootVisitor* v) override;
+  void GCEpilogueInSafepoint(GCType gc_type) override;
+
  private:
   // Internal implementation should not be called directly by subclasses.
-  int ScanKeysFor(Address address, uint32_t hash) const;
+  // The result is {index, found}. The index is either:
+  //   * The index where the key was found (found=true)
+  //   * The index of the first empty space encountered (found=false)
+  //   * -1 if the table is full and the key was not found (found=false)
+  std::pair<int, bool> ScanKeysFor(Address address, uint32_t hash) const;
   std::pair<int, bool> InsertKey(Address address, uint32_t hash);
   int Lookup(Address key) const;
   std::pair<int, bool> LookupOrInsert(Address key);
@@ -81,15 +92,16 @@ class V8_EXPORT_PRIVATE IdentityMapBase {
   void Rehash();
   void Resize(int new_capacity);
   uint32_t Hash(Address address) const;
+  bool ShouldGrow() const;
 
   base::hash<uintptr_t> hasher_;
   Heap* heap_;
-  int gc_counter_;
+  // Set to true on GCs. We need to Rehash() once true.
+  bool invalidated_;
   int size_;
   int capacity_;
   int mask_;
   Address* keys_;
-  StrongRootsEntry* strong_roots_entry_;
   uintptr_t* values_;
   bool is_iterable_;
 };
@@ -111,8 +123,8 @@ template <typename V, class AllocationPolicy>
 class IdentityMap : public IdentityMapBase {
  public:
   static_assert(sizeof(V) <= sizeof(uintptr_t));
-  static_assert(std::is_trivially_copyable<V>::value);
-  static_assert(std::is_trivially_destructible<V>::value);
+  static_assert(std::is_trivially_copyable_v<V>);
+  static_assert(std::is_trivially_destructible_v<V>);
 
   explicit IdentityMap(Heap* heap,
                        AllocationPolicy allocator = AllocationPolicy())
@@ -125,7 +137,7 @@ class IdentityMap : public IdentityMapBase {
   // as the identity, returning:
   //    found => a pointer to the storage location for the value, true
   //    not found => a pointer to a new storage location for the value, false
-  IdentityMapFindResult<V> FindOrInsert(Handle<Object> key) {
+  IdentityMapFindResult<V> FindOrInsert(DirectHandle<Object> key) {
     return FindOrInsert(*key);
   }
   IdentityMapFindResult<V> FindOrInsert(Tagged<Object> key) {
@@ -137,19 +149,19 @@ class IdentityMap : public IdentityMapBase {
   // as the identity, returning:
   //    found => a pointer to the storage location for the value
   //    not found => {nullptr}
-  V* Find(Handle<Object> key) const { return Find(*key); }
+  V* Find(DirectHandle<Object> key) const { return Find(*key); }
   V* Find(Tagged<Object> key) const {
     return reinterpret_cast<V*>(FindEntry(key.ptr()));
   }
 
   // Insert the value for the given key. The key must not have previously
   // existed.
-  void Insert(Handle<Object> key, V v) { Insert(*key, v); }
+  void Insert(DirectHandle<Object> key, V v) { Insert(*key, v); }
   void Insert(Tagged<Object> key, V v) {
     *reinterpret_cast<V*>(InsertEntry(key.ptr())) = v;
   }
 
-  bool Delete(Handle<Object> key, V* deleted_value) {
+  bool Delete(DirectHandle<Object> key, V* deleted_value) {
     return Delete(*key, deleted_value);
   }
   bool Delete(Tagged<Object> key, V* deleted_value) {

@@ -5,8 +5,10 @@
 #ifndef V8_OBJECTS_SMI_H_
 #define V8_OBJECTS_SMI_H_
 
+#include <type_traits>
+
 #include "src/common/globals.h"
-#include "src/objects/objects.h"
+#include "src/objects/tagged.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -20,19 +22,8 @@ namespace internal {
 // For long smis it has the following format:
 //     [32 bit signed int] [31 bits zero padding] 0
 // Smi stands for small integer.
-class Smi : public Object {
+class Smi : public AllStatic {
  public:
-  // This replaces the OBJECT_CONSTRUCTORS macro, because Smis are special
-  // in that we want them to be constexprs.
-  constexpr Smi() : Object() {}
-  explicit constexpr Smi(Address ptr, SkipTypeCheckTag)
-      : Object(ptr, SkipTypeCheckTag()) {}
-  explicit constexpr Smi(Address ptr) : Object(ptr) {
-    DCHECK(HAS_SMI_TAG(ptr));
-  }
-
-  // Returns the integer value.
-  inline constexpr int value() const { return Internals::SmiValue(ptr()); }
   static inline constexpr Tagged<Smi> ToUint32Smi(Tagged<Smi> smi) {
     if (smi.value() <= 0) return Smi::FromInt(0);
     return Smi::FromInt(static_cast<uint32_t>(smi.value()));
@@ -43,10 +34,23 @@ class Smi : public Object {
     return Tagged<Smi>(object.ptr()).value();
   }
 
+  // Convert a positive Smi object to an uint32_t.
+  static inline constexpr uint32_t ToUInt(const Tagged<Object> object) {
+    int value = ToInt(object);
+    DCHECK_GE(value, 0);
+    return static_cast<uint32_t>(value);
+  }
+
   // Convert a value to a Smi object.
   static inline constexpr Tagged<Smi> FromInt(int value) {
     DCHECK(Smi::IsValid(value));
-    return Tagged<Smi>(Internals::IntToSmi(value));
+    return Tagged<Smi>(Internals::IntegralToSmi(value));
+  }
+
+  // Convert a value from [0, kMaxSmiValue] range to a Smi object.
+  static inline constexpr Tagged<Smi> FromUInt(uint32_t value) {
+    DCHECK(Smi::IsValid(value));
+    return Tagged<Smi>(Internals::IntegralToSmi(value));
   }
 
   static inline constexpr Tagged<Smi> FromIntptr(intptr_t value) {
@@ -63,17 +67,28 @@ class Smi : public Object {
                         (32 - kSmiValueSize));
   }
 
-  template <typename E,
-            typename = typename std::enable_if<std::is_enum<E>::value>::type>
-  static inline constexpr Tagged<Smi> FromEnum(E value) {
+  template <typename E>
+  static inline constexpr Tagged<Smi> FromEnum(E value)
+    requires std::is_enum_v<E>
+  {
     static_assert(sizeof(E) <= sizeof(int));
     return FromInt(static_cast<int>(value));
   }
 
   // Returns whether value can be represented in a Smi.
-  static inline bool constexpr IsValid(intptr_t value) {
+  template <typename T>
+  static inline bool constexpr IsValid(T value)
+    requires(std::is_integral_v<T> && std::is_signed_v<T>)
+  {
     DCHECK_EQ(Internals::IsValidSmi(value),
               value >= kMinValue && value <= kMaxValue);
+    return Internals::IsValidSmi(value);
+  }
+  template <typename T>
+  static inline bool constexpr IsValid(T value)
+    requires(std::is_integral_v<T> && std::is_unsigned_v<T>)
+  {
+    DCHECK_EQ(Internals::IsValidSmi(value), value <= kMaxValue);
     return Internals::IsValidSmi(value);
   }
 
@@ -87,8 +102,6 @@ class Smi : public Object {
   V8_EXPORT_PRIVATE static Address LexicographicCompare(Isolate* isolate,
                                                         Tagged<Smi> x,
                                                         Tagged<Smi> y);
-
-  DECL_CAST(Smi)
 
   // Dispatched behavior.
   V8_EXPORT_PRIVATE static void SmiPrint(Tagged<Smi> smi, std::ostream& os);
@@ -115,22 +128,6 @@ class Smi : public Object {
     return Tagged<Smi>(kNullAddress);
   }
 };
-
-CAST_ACCESSOR(Smi)
-
-// Defined Tagged<Smi> now that Smi exists.
-
-// Implicit conversions to/from raw pointers
-// TODO(leszeks): Remove once we're using Tagged everywhere.
-// NOLINTNEXTLINE
-constexpr Tagged<Smi>::Tagged(Smi raw) : TaggedBase(raw.ptr()) {
-  static_assert(kTaggedCanConvertToRawObjects);
-}
-// NOLINTNEXTLINE
-constexpr Tagged<Smi>::operator Smi() {
-  static_assert(kTaggedCanConvertToRawObjects);
-  return Smi(ptr());
-}
 
 }  // namespace internal
 }  // namespace v8

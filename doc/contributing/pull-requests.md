@@ -53,7 +53,7 @@ help, questions, and discussions.
 development of Node.js core specifically.
 
 Node.js also has an unofficial IRC channel:
-[#Node.js](https://web.libera.chat/?channels=node.js).
+[#Node.js](https://web.libera.chat/#node.js).
 
 ## Setting up your local environment
 
@@ -122,7 +122,7 @@ If you are modifying code, please be sure to run `make lint` (or
 code style guide.
 
 Any documentation you write (including code comments and API documentation)
-should follow the [Style Guide](../../README.md). Code samples
+should follow the [Style Guide](../../doc/README.md). Code samples
 included in the API docs will also be checked when running `make lint` (or
 `vcbuild.bat lint` on Windows). If you are adding to or deprecating an API,
 add or change the appropriate YAML documentation. Use `REPLACEME` for the
@@ -184,6 +184,11 @@ A good commit message should describe what changed and why.
    of the log. Use the `Fixes:` prefix and the full issue URL. For other
    references use `Refs:`.
 
+   `Fixes:` and `Refs:` trailers get automatically added to your commit message
+   when the Pull Request lands as long as they are included in the
+   Pull Request's description. If the Pull Request lands in several commits,
+   by default the trailers found in the description are added to each commits.
+
    Examples:
 
    * `Fixes: https://github.com/nodejs/node/issues/1337`
@@ -193,6 +198,14 @@ A good commit message should describe what changed and why.
 5. If your commit introduces a breaking change (`semver-major`), it should
    contain an explanation about the reason of the breaking change, which
    situation would trigger the breaking change, and what is the exact change.
+
+6. Your commit must contain the `Signed-off-by` line with your name and email
+   address as an acknowledgement that you agree to the [Developer Certificate of Origin][].
+   Bot generated commits are exempt from this requirement. If a commit has
+   multiple authors, the `Signed-off-by` line should be added for each author;
+   and at least one should match the author information in the commit metadata.
+   This rule does not apply to dependency updates (e.g. cherry-picks), release
+   commits, or backport commits.
 
 Sample complete commit message:
 
@@ -205,6 +218,7 @@ less.
 
 Fixes: https://github.com/nodejs/node/issues/1337
 Refs: https://eslint.org/docs/rules/space-in-parens.html
+Signed-off-by: J. Random User <j.random.user@example.com>
 ```
 
 If you are new to contributing to Node.js, please try to do your best at
@@ -274,6 +288,9 @@ git push origin my-branch
 From within GitHub, opening a new pull request will present you with a
 [pull request template][]. Please try to do your best at filling out the
 details, but feel free to skip parts if you're not sure what to put.
+
+If your pull request exceeds 5000 lines of changes, see the
+[large pull requests][] guide for additional requirements.
 
 Once opened, pull requests are usually reviewed within a few days.
 
@@ -441,6 +458,11 @@ credit for the work they started (either by preserving their name and email
 address) in the commit log, or by using an `Author:` meta-data tag in the
 commit.
 
+If a pull request has been inactive for more than six months, add the `stalled` label
+to it. That will trigger an automation that adds a comment explaining the pull request
+may be close for inactivity, giving a heads-up to the contributor before actually
+closing it if it remains inactive.
+
 ### Approving a change
 
 Any Node.js core collaborator (any GitHub user with commit rights in the
@@ -548,8 +570,7 @@ A pull request is approved either by saying LGTM, which stands for
 "Looks Good To Me", or by using GitHub's Approve button.
 GitHub's pull request review feature can be used during the process.
 For more information, check out
-[the video tutorial](https://www.youtube.com/watch?v=HW0RPaJqm4g)
-or [the official documentation](https://help.github.com/articles/reviewing-changes-in-pull-requests/).
+[the official documentation](https://help.github.com/articles/reviewing-changes-in-pull-requests/).
 
 After you push new changes to your branch, you need to get
 approval for these new changes again, even if GitHub shows "Approved"
@@ -585,6 +606,7 @@ More than one subsystem may be valid for any particular issue or pull request.
 [Building guide]: ../../BUILDING.md
 [CI (Continuous Integration) test run]: #continuous-integration-testing
 [Code of Conduct]: https://github.com/nodejs/admin/blob/HEAD/CODE_OF_CONDUCT.md
+[Developer Certificate of Origin]: ../../CONTRIBUTING.md#developers-certificate-of-origin-11
 [Onboarding guide]: ../../onboarding.md
 [approved]: #getting-approvals-for-your-pull-request
 [benchmark results]: writing-and-running-benchmarks.md
@@ -592,6 +614,7 @@ More than one subsystem may be valid for any particular issue or pull request.
 [guide for writing tests in Node.js]: writing-tests.md
 [hiding-a-comment]: https://help.github.com/articles/managing-disruptive-comments/#hiding-a-comment
 [https://ci.nodejs.org/]: https://ci.nodejs.org/
+[large pull requests]: large-pull-requests.md
 [maintaining dependencies]: ./maintaining/maintaining-dependencies.md
 [nodejs/core-validate-commit]: https://github.com/nodejs/core-validate-commit/blob/main/lib/rules/subsystem.js
 [pull request template]: https://raw.githubusercontent.com/nodejs/node/HEAD/.github/PULL_REQUEST_TEMPLATE.md

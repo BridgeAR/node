@@ -7,14 +7,18 @@ name: Notify on Push
 permissions:
   contents: read
 
+env:
+  NODE_VERSION: lts/*
+
 jobs:
   notifyOnForcePush:
     name: Notify on Force Push on `main`
     if: github.repository == 'nodejs/node' && github.event.forced
-    runs-on: ubuntu-latest
+    # cannot use ubuntu-slim here because rtCamp/action-slack-notify is dockerized
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Slack Notification
-        uses: rtCamp/action-slack-notify@b24d75fe0e728a4bf9fc42ee217caa686d141ee8  # 2.2.1
+        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661  # 2.3.3
         env:
           SLACK_COLOR: '#DE512A'
           SLACK_ICON: https://github.com/nodejs.png?size=48
@@ -27,40 +31,27 @@ jobs:
           SLACK_USERNAME: nodejs-bot
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
-  notifyOnMissingMetadata:
-    name: Notify on Push on `main` that lacks metadata
-    if: github.repository == 'nodejs/node'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
+  validateCommitMessage:
+    name: Notify on Push on `main` with invalid message
+    # cannot use ubuntu-slim here because rtCamp/action-slack-notify is dockerized
+    runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
         with:
-          persist-credentials: false
-      - name: Check commit message
-        run: npx -q core-validate-commit ${{ github.event.after }} || echo "INVALID_COMMIT_MESSAGE=1" >> $GITHUB_ENV
-      - name: Retrieve PR number if possible
-        if: env.INVALID_COMMIT_MESSAGE
-        run: |
-          COMMIT_TITLE=$(git --no-pager log --oneline -1 --no-color) node <<'EOF' >> $GITHUB_ENV || true
-          const invalidCommitMessageMatch = /\s\(\#(\d+)\)$/.exec(process.env.COMMIT_TITLE);
-          if (invalidCommitMessageMatch == null) process.exit(1)
-          console.log(`PR_ID=${invalidCommitMessageMatch[1]}`)
-          EOF
-      - name: Comment on the Pull Request
-        if: ${{ env.PR_ID }}
-        run: |
-          gh pr comment ${{ env.PR_ID }} --repo "${{ github.repository }}" \
-            --body "A commit referencing this Pull Request was pushed to `${{ github.ref_name }}` by @${{ github.actor }} with an invalid commit message."
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Validate commits
+        run: echo "$COMMITS" | npx -q core-validate-commit -
+        id: commit-check
         env:
-          GH_TOKEN: ${{ github.token }}
+          COMMITS: ${{ toJSON(github.event.commits) }}
       - name: Slack Notification
-        if: ${{ env.INVALID_COMMIT_MESSAGE }}
-        uses: rtCamp/action-slack-notify@b24d75fe0e728a4bf9fc42ee217caa686d141ee8  # 2.2.1
+        if: ${{ failure() && steps.commit-check.conclusion == 'failure' && github.repository == 'nodejs/node' }}
+        uses: rtCamp/action-slack-notify@e31e87e03dd19038e411e38ae27cbad084a90661  # 2.3.3
         env:
           SLACK_COLOR: '#DE512A'
           SLACK_ICON: https://github.com/nodejs.png?size=48
-          SLACK_TITLE: Invalid commit was pushed to ${{ github.repository.default_branch }}
+          SLACK_TITLE: Invalid commit was pushed to ${{ github.ref }}
           SLACK_MESSAGE: |
             <!here> A commit with an invalid message was pushed to <https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}|${{ github.repository }}@${{ github.ref_name }}> by <https://github.com/${{ github.actor }}|${{ github.actor }}>.
 

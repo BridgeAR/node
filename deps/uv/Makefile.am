@@ -59,15 +59,15 @@ if WINNT
 uvinclude_HEADERS += include/uv/win.h include/uv/tree.h
 AM_CPPFLAGS += -I$(top_srcdir)/src/win \
                -DWIN32_LEAN_AND_MEAN \
-               -D_WIN32_WINNT=0x0602
+               -D_WIN32_WINNT=0x0A00
 libuv_la_SOURCES += src/win/async.c \
-                    src/win/atomicops-inl.h \
                     src/win/core.c \
                     src/win/detect-wakeup.c \
                     src/win/dl.c \
                     src/win/error.c \
                     src/win/fs-event.c \
                     src/win/fs.c \
+                    src/win/fs-fd-hash-inl.h \
                     src/win/getaddrinfo.c \
                     src/win/getnameinfo.c \
                     src/win/handle.c \
@@ -136,6 +136,12 @@ TESTS = test/run-tests
 check_PROGRAMS = test/run-tests
 test_run_tests_CFLAGS = $(AM_CFLAGS)
 
+if WINNT
+check-am: test/run-tests_no_ext
+test/run-tests_no_ext: test/run-tests$(EXEEXT)
+	cp test/run-tests$(EXEEXT) test/run-tests_no_ext
+endif
+
 if SUNOS
 # Can't be turned into a CC_CHECK_CFLAGS in configure.ac, it makes compilers
 # on other platforms complain that the argument is unused during compilation.
@@ -192,6 +198,7 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-hrtime.c \
                          test/test-idle.c \
                          test/test-idna.c \
+                         test/test-iouring-pollhup.c \
                          test/test-ip4-addr.c \
                          test/test-ip6-addr.c \
                          test/test-ip-name.c \
@@ -199,12 +206,13 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-ipc-send-recv.c \
                          test/test-ipc.c \
                          test/test-list.h \
-                         test/test-loop-handles.c \
                          test/test-loop-alive.c \
                          test/test-loop-close.c \
+                         test/test-loop-configure.c \
+                         test/test-loop-handles.c \
+                         test/test-loop-oom.c \
                          test/test-loop-stop.c \
                          test/test-loop-time.c \
-                         test/test-loop-configure.c \
                          test/test-metrics.c \
                          test/test-multiple-listen.c \
                          test/test-mutexes.c \
@@ -269,6 +277,7 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-tcp-flags.c \
                          test/test-tcp-open.c \
                          test/test-tcp-read-stop.c \
+                         test/test-tcp-reuseport.c \
                          test/test-tcp-read-stop-start.c \
                          test/test-tcp-rst.c \
                          test/test-tcp-shutdown-after-write.c \
@@ -286,6 +295,8 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-thread-equal.c \
                          test/test-thread.c \
                          test/test-thread-affinity.c \
+                         test/test-thread-name.c \
+                         test/test-thread-priority.c \
                          test/test-threadpool-cancel.c \
                          test/test-threadpool.c \
                          test/test-timer-again.c \
@@ -315,8 +326,11 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-udp-send-immediate.c \
                          test/test-udp-sendmmsg-error.c \
                          test/test-udp-send-unreachable.c \
+                         test/test-udp-recv-cb-close-pollerr.c \
+                         test/test-udp-recvmsg-unreachable-error.c \
                          test/test-udp-try-send.c \
                          test/test-udp-recv-in-a-row.c \
+                         test/test-udp-reuseport.c \
                          test/test-uname.c \
                          test/test-walk-handles.c \
                          test/test-watcher-cross-stop.c
@@ -420,12 +434,13 @@ libuv_la_CFLAGS += -D_DARWIN_UNLIMITED_SELECT=1
 libuv_la_SOURCES += src/unix/bsd-ifaddrs.c \
                     src/unix/darwin-proctitle.c \
                     src/unix/darwin-stub.h \
+                    src/unix/darwin-syscalls.h \
                     src/unix/darwin.c \
                     src/unix/fsevents.c \
                     src/unix/kqueue.c \
                     src/unix/proctitle.c \
                     src/unix/random-getentropy.c
-test_run_tests_LDFLAGS += -lutil
+test_run_tests_LDFLAGS += -lutil -lm
 endif
 
 if DRAGONFLY
@@ -435,7 +450,7 @@ libuv_la_SOURCES += src/unix/bsd-ifaddrs.c \
                     src/unix/freebsd.c \
                     src/unix/kqueue.c \
                     src/unix/posix-hrtime.c
-test_run_tests_LDFLAGS += -lutil
+test_run_tests_LDFLAGS += -lutil -lm
 endif
 
 if FREEBSD
@@ -446,7 +461,7 @@ libuv_la_SOURCES += src/unix/bsd-ifaddrs.c \
                     src/unix/kqueue.c \
                     src/unix/posix-hrtime.c \
                     src/unix/random-getrandom.c
-test_run_tests_LDFLAGS += -lutil
+test_run_tests_LDFLAGS += -lutil -lm
 endif
 
 if HAIKU
@@ -478,7 +493,7 @@ libuv_la_SOURCES += src/unix/linux.c \
                     src/unix/proctitle.c \
                     src/unix/random-getrandom.c \
                     src/unix/random-sysctl-linux.c
-test_run_tests_LDFLAGS += -lutil
+test_run_tests_LDFLAGS += -lutil -lm
 endif
 
 if MSYS
@@ -501,7 +516,7 @@ libuv_la_SOURCES += src/unix/bsd-ifaddrs.c \
                     src/unix/kqueue.c \
                     src/unix/netbsd.c \
                     src/unix/posix-hrtime.c
-test_run_tests_LDFLAGS += -lutil
+test_run_tests_LDFLAGS += -lutil -lm
 endif
 
 if OPENBSD
@@ -512,7 +527,7 @@ libuv_la_SOURCES += src/unix/bsd-ifaddrs.c \
                     src/unix/openbsd.c \
                     src/unix/posix-hrtime.c \
                     src/unix/random-getentropy.c
-test_run_tests_LDFLAGS += -lutil
+test_run_tests_LDFLAGS += -lutil -lm
 endif
 
 if SUNOS

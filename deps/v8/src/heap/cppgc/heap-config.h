@@ -17,6 +17,17 @@ enum class CollectionType : uint8_t {
   kMajor,
 };
 
+// Specifies how free memory should be returned to the system.
+enum class FreeMemoryHandling : uint8_t {
+  // Do not discard or decommit free memory.
+  kRetainMemory,
+  // Return memory to the system as much as possible:
+  // - Discard free address ranges as they are found, if supported by the
+  //   current build configuration (see CanDiscardMemory()).
+  // - Decommit pooled pages at the end of a sweep cycle.
+  kReleaseMemory
+};
+
 struct MarkingConfig {
   using MarkingType = cppgc::Heap::MarkingType;
   enum class IsForcedGC : uint8_t {
@@ -30,19 +41,17 @@ struct MarkingConfig {
   StackState stack_state = StackState::kMayContainHeapPointers;
   MarkingType marking_type = MarkingType::kIncremental;
   IsForcedGC is_forced_gc = IsForcedGC::kNotForced;
-  v8::base::TimeDelta incremental_task_delay = v8::base::TimeDelta();
-  bool bailout_of_marking_when_ahead_of_schedule = false;
 };
 
 struct SweepingConfig {
   using SweepingType = cppgc::Heap::SweepingType;
   enum class CompactableSpaceHandling { kSweep, kIgnore };
-  enum class FreeMemoryHandling { kDoNotDiscard, kDiscardWherePossible };
+  using FreeMemoryHandling = cppgc::internal::FreeMemoryHandling;
 
   SweepingType sweeping_type = SweepingType::kIncrementalAndConcurrent;
   CompactableSpaceHandling compactable_space_handling =
       CompactableSpaceHandling::kSweep;
-  FreeMemoryHandling free_memory_handling = FreeMemoryHandling::kDoNotDiscard;
+  FreeMemoryHandling free_memory_handling = FreeMemoryHandling::kRetainMemory;
 };
 
 struct GCConfig {
@@ -97,7 +106,7 @@ struct GCConfig {
   StackState stack_state = StackState::kMayContainHeapPointers;
   MarkingType marking_type = MarkingType::kAtomic;
   SweepingType sweeping_type = SweepingType::kAtomic;
-  FreeMemoryHandling free_memory_handling = FreeMemoryHandling::kDoNotDiscard;
+  FreeMemoryHandling free_memory_handling = FreeMemoryHandling::kRetainMemory;
   IsForcedGC is_forced_gc = IsForcedGC::kNotForced;
 };
 

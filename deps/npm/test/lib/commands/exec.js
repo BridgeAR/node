@@ -1,6 +1,6 @@
 const t = require('tap')
-const fs = require('fs/promises')
-const path = require('path')
+const fs = require('node:fs/promises')
+const path = require('node:path')
 const { load: loadMockNpm } = require('../../fixtures/mock-npm.js')
 const MockRegistry = require('@npmcli/mock-registry')
 
@@ -41,6 +41,7 @@ t.test('registry package', async t => {
   })
 
   await registry.package({
+    times: 2,
     manifest,
     tarballs: {
       '1.0.0': path.join(npm.prefix, 'npm-exec-test'),
@@ -75,7 +76,7 @@ t.test('--prefix', async t => {
   })
 
   // This is what `--prefix` does
-  npm.globalPrefix = npm.localPrefix
+  npm.config.globalPrefix = npm.config.localPrefix
 
   await registry.package({
     manifest,
@@ -252,4 +253,118 @@ t.test('npx --no-install @npmcli/npx-test', async t => {
       'Expected error message thrown'
     )
   }
+})
+
+t.test('packs from git spec', async t => {
+  const spec = 'test/test#111111aaaaaaaabbbbbbbbccccccdddddddeeeee'
+  const pkgPath = path.resolve(__dirname, '../../fixtures/git-test.tgz')
+
+  const srv = MockRegistry.tnock(t, 'https://codeload.github.com')
+  srv.get('/test/test/tar.gz/111111aaaaaaaabbbbbbbbccccccdddddddeeeee')
+    .times(2)
+    .reply(200, await fs.readFile(pkgPath))
+
+  const { npm } = await loadMockNpm(t, {
+    config: {
+      audit: false,
+      yes: true,
+    },
+  })
+  try {
+    await npm.exec('exec', [spec])
+    const exists = await fs.stat(path.join(npm.prefix, 'npm-exec-test-success'))
+    t.ok(exists.isFile(), 'bin ran, creating file')
+  } catch (err) {
+    t.fail(err, 'should not throw')
+  }
+})
+
+t.test('can run packages with keywords', async t => {
+  const { npm } = await loadMockNpm(t, {
+    prefixDir: {
+      'package.json': JSON.stringify({
+        name: '@npmcli/npx-package-test',
+        bin: { select: 'index.js' },
+      }),
+      'index.js': `#!/usr/bin/env node
+      require('fs').writeFileSync('npm-exec-test-success', (process.argv.length).toString())`,
+    },
+  })
+
+  try {
+    await npm.exec('exec', ['select'])
+
+    const testFilePath = path.join(npm.prefix, 'npm-exec-test-success')
+    const exists = await fs.stat(testFilePath)
+    t.ok(exists.isFile(), 'bin ran, creating file')
+    const noExtraArgumentCount = await fs.readFile(testFilePath, 'utf8')
+    t.equal(+noExtraArgumentCount, 2, 'should have no extra arguments')
+  } catch (err) {
+    t.fail(err, 'should not throw')
+  }
+})
+
+t.test('exec threads allowScripts policy from .npmrc through to libexec', async t => {
+  let capturedOpts
+  const fakeLibexec = async (opts) => {
+    capturedOpts = opts
+  }
+  const { npm } = await loadMockNpm(t, {
+    prefixDir: {
+      'package.json': JSON.stringify({ name: 'host', version: '1.0.0' }),
+      '.npmrc': 'allow-scripts = canvas',
+    },
+    mocks: {
+      libnpmexec: fakeLibexec,
+    },
+  })
+  await npm.exec('exec', ['some-pkg'])
+  t.strictSame(capturedOpts.allowScripts, { canvas: true },
+    'allowScripts populated from .npmrc layer')
+})
+
+t.test('exec ignores project package.json#allowScripts (RFC: .npmrc-only)', async t => {
+  // Per RFC line 299, exec/npx consults only user/global .npmrc. Project
+  // package.json policy must NOT influence npx behaviour, even when the
+  // user is running npx inside a project that has its own allowScripts.
+  let capturedOpts
+  const { npm } = await loadMockNpm(t, {
+    prefixDir: {
+      'package.json': JSON.stringify({
+        name: 'host',
+        version: '1.0.0',
+        allowScripts: { sharp: true },
+      }),
+    },
+    mocks: {
+      libnpmexec: async (opts) => {
+        capturedOpts = opts
+      },
+    },
+  })
+  await npm.exec('exec', ['some-pkg'])
+  // package.json policy is skipped; no other layer has policy; result is null.
+  t.equal(capturedOpts.allowScripts, null)
+})
+
+t.test('exec reads .npmrc policy even when project package.json has a different policy', async t => {
+  // .npmrc-tier policy wins because package.json is skipped entirely.
+  let capturedOpts
+  const { npm } = await loadMockNpm(t, {
+    prefixDir: {
+      'package.json': JSON.stringify({
+        name: 'host',
+        version: '1.0.0',
+        allowScripts: { sharp: true },
+      }),
+      '.npmrc': 'allow-scripts = canvas',
+    },
+    mocks: {
+      libnpmexec: async (opts) => {
+        capturedOpts = opts
+      },
+    },
+  })
+  await npm.exec('exec', ['some-pkg'])
+  t.strictSame(capturedOpts.allowScripts, { canvas: true })
 })

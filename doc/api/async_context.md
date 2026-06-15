@@ -75,8 +75,8 @@ http.get('http://localhost:8080');
 http.get('http://localhost:8080');
 // Prints:
 //   0: start
-//   1: start
 //   0: finish
+//   1: start
 //   1: finish
 ```
 
@@ -107,8 +107,8 @@ http.get('http://localhost:8080');
 http.get('http://localhost:8080');
 // Prints:
 //   0: start
-//   1: start
 //   0: finish
+//   1: start
 //   1: finish
 ```
 
@@ -116,13 +116,16 @@ Each instance of `AsyncLocalStorage` maintains an independent storage context.
 Multiple instances can safely exist simultaneously without risk of interfering
 with each other's data.
 
-### `new AsyncLocalStorage()`
+### `new AsyncLocalStorage([options])`
 
 <!-- YAML
 added:
  - v13.10.0
  - v12.17.0
 changes:
+ - version: v24.0.0
+   pr-url: https://github.com/nodejs/node/pull/57766
+   description: Add `defaultValue` and `name` options.
  - version:
     - v19.7.0
     - v18.16.0
@@ -135,6 +138,10 @@ changes:
    description: Add option onPropagate.
 -->
 
+* `options` {Object}
+  * `defaultValue` {any} The default value to be used when no store is provided.
+  * `name` {string} A name for the `AsyncLocalStorage` value.
+
 Creates a new instance of `AsyncLocalStorage`. Store is only provided within a
 `run()` call or after an `enterWith()` call.
 
@@ -144,9 +151,13 @@ Creates a new instance of `AsyncLocalStorage`. Store is only provided within a
 added:
  - v19.8.0
  - v18.16.0
+changes:
+ - version:
+    - v23.11.0
+    - v22.15.0
+   pr-url: https://github.com/nodejs/node/pull/57510
+   description: Marking the API stable.
 -->
-
-> Stability: 1 - Experimental
 
 * `fn` {Function} The function to bind to the current execution context.
 * Returns: {Function} A new function that calls `fn` within the captured
@@ -160,9 +171,13 @@ Binds the given function to the current execution context.
 added:
  - v19.8.0
  - v18.16.0
+changes:
+ - version:
+    - v23.11.0
+    - v22.15.0
+   pr-url: https://github.com/nodejs/node/pull/57510
+   description: Marking the API stable.
 -->
-
-> Stability: 1 - Experimental
 
 * Returns: {Function} A new function with the signature
   `(fn: (...args) : R, ...args) : R`.
@@ -282,6 +297,16 @@ emitter.emit('my-event');
 asyncLocalStorage.getStore(); // Returns the same object
 ```
 
+### `asyncLocalStorage.name`
+
+<!-- YAML
+added: v24.0.0
+-->
+
+* Type: {string}
+
+The name of the `AsyncLocalStorage` instance if provided.
+
 ### `asyncLocalStorage.run(store, callback[, ...args])`
 
 <!-- YAML
@@ -361,6 +386,111 @@ try {
 }
 ```
 
+### `asyncLocalStorage.withScope(store)`
+
+<!-- YAML
+added:
+ - v25.9.0
+-->
+
+> Stability: 1 - Experimental
+
+* `store` {any}
+* Returns: {RunScope}
+
+Creates a disposable scope that enters the given store and automatically
+restores the previous store value when the scope is disposed. This method is
+designed to work with JavaScript's explicit resource management (`using` syntax).
+
+Example:
+
+```mjs
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const asyncLocalStorage = new AsyncLocalStorage();
+
+{
+  using _ = asyncLocalStorage.withScope('my-store');
+  console.log(asyncLocalStorage.getStore()); // Prints: my-store
+}
+
+console.log(asyncLocalStorage.getStore()); // Prints: undefined
+```
+
+```cjs
+const { AsyncLocalStorage } = require('node:async_hooks');
+
+const asyncLocalStorage = new AsyncLocalStorage();
+
+{
+  using _ = asyncLocalStorage.withScope('my-store');
+  console.log(asyncLocalStorage.getStore()); // Prints: my-store
+}
+
+console.log(asyncLocalStorage.getStore()); // Prints: undefined
+```
+
+The `withScope()` method is particularly useful for managing context in
+synchronous code where you want to ensure the previous store value is restored
+when exiting a block, even if an error is thrown.
+
+```mjs
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const asyncLocalStorage = new AsyncLocalStorage();
+
+try {
+  using _ = asyncLocalStorage.withScope('my-store');
+  console.log(asyncLocalStorage.getStore()); // Prints: my-store
+  throw new Error('test');
+} catch (e) {
+  // Store is automatically restored even after error
+  console.log(asyncLocalStorage.getStore()); // Prints: undefined
+}
+```
+
+```cjs
+const { AsyncLocalStorage } = require('node:async_hooks');
+
+const asyncLocalStorage = new AsyncLocalStorage();
+
+try {
+  using _ = asyncLocalStorage.withScope('my-store');
+  console.log(asyncLocalStorage.getStore()); // Prints: my-store
+  throw new Error('test');
+} catch (e) {
+  // Store is automatically restored even after error
+  console.log(asyncLocalStorage.getStore()); // Prints: undefined
+}
+```
+
+**Important:** When using `withScope()` in async functions before the first
+`await`, be aware that the scope change will affect the caller's context. The
+synchronous portion of an async function (before the first `await`) runs
+immediately when called, and when it reaches the first `await`, it returns the
+promise to the caller. At that point, the scope change becomes visible in the
+caller's context and will persist in subsequent synchronous code until something
+else changes the scope value. For async operations, prefer using `run()` which
+properly isolates context across async boundaries.
+
+```mjs
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const asyncLocalStorage = new AsyncLocalStorage();
+
+async function example() {
+  using _ = asyncLocalStorage.withScope('my-store');
+  console.log(asyncLocalStorage.getStore()); // Prints: my-store
+  await someAsyncOperation(); // Function pauses here and returns promise
+  console.log(asyncLocalStorage.getStore()); // Prints: my-store
+}
+
+// Calling without await
+example(); // Synchronous portion runs, then pauses at first await
+// After the promise is returned, the scope 'my-store' is now active in caller!
+console.log(asyncLocalStorage.getStore()); // Prints: my-store (unexpected!)
+```
+
 ### Usage with `async/await`
 
 If, within an async function, only one `await` call is to run within a context,
@@ -394,6 +524,66 @@ Find the function call responsible for the context loss by logging the content
 of `asyncLocalStorage.getStore()` after the calls you suspect are responsible
 for the loss. When the code logs `undefined`, the last callback called is
 probably responsible for the context loss.
+
+## Class: `RunScope`
+
+<!-- YAML
+added:
+ - v25.9.0
+-->
+
+> Stability: 1 - Experimental
+
+A disposable scope returned by [`asyncLocalStorage.withScope()`][] that
+automatically restores the previous store value when disposed. This class
+implements the [Explicit Resource Management][] protocol and is designed to work
+with JavaScript's `using` syntax.
+
+The scope automatically restores the previous store value when the `using` block
+exits, whether through normal completion or by throwing an error.
+
+### `scope.dispose()`
+
+<!-- YAML
+added:
+ - v25.9.0
+-->
+
+Explicitly ends the scope and restores the previous store value. This method
+is idempotent: calling it multiple times has the same effect as calling it once.
+
+The `[Symbol.dispose]()` method defers to `dispose()`.
+
+If `withScope()` is called without the `using` keyword, `dispose()` must be
+called manually to restore the previous store value. Forgetting to call
+`dispose()` will cause the store value to persist for the remainder of the
+current execution context:
+
+```mjs
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const storage = new AsyncLocalStorage();
+
+// Without using, the scope must be disposed manually
+const scope = storage.withScope('my-store');
+// storage.getStore() === 'my-store' here
+
+scope.dispose(); // Restore previous value
+// storage.getStore() === undefined here
+```
+
+```cjs
+const { AsyncLocalStorage } = require('node:async_hooks');
+
+const storage = new AsyncLocalStorage();
+
+// Without using, the scope must be disposed manually
+const scope = storage.withScope('my-store');
+// storage.getStore() === 'my-store' here
+
+scope.dispose(); // Restore previous value
+// storage.getStore() === undefined here
+```
 
 ## Class: `AsyncResource`
 
@@ -626,7 +816,6 @@ a Worker pool around it could use the following structure:
 ```mjs
 import { AsyncResource } from 'node:async_hooks';
 import { EventEmitter } from 'node:events';
-import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 
 const kTaskInfo = Symbol('kTaskInfo');
@@ -881,8 +1070,10 @@ const server = createServer((req, res) => {
 }).listen(3000);
 ```
 
+[Explicit Resource Management]: https://github.com/tc39/proposal-explicit-resource-management
 [`AsyncResource`]: #class-asyncresource
 [`EventEmitter`]: events.md#class-eventemitter
 [`Stream`]: stream.md#stream
 [`Worker`]: worker_threads.md#class-worker
+[`asyncLocalStorage.withScope()`]: #asynclocalstoragewithscopestore
 [`util.promisify()`]: util.md#utilpromisifyoriginal

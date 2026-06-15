@@ -117,7 +117,6 @@ bool OSHasAVXSupport() {
 bool CpuFeatures::SupportsWasmSimd128() {
 #if V8_ENABLE_WEBASSEMBLY
   if (IsSupported(SSE4_1)) return true;
-  if (v8_flags.wasm_simd_ssse3_codegen && IsSupported(SSSE3)) return true;
 #endif  // V8_ENABLE_WEBASSEMBLY
   return false;
 }
@@ -285,15 +284,9 @@ Register Operand::reg() const {
 
 bool operator!=(Operand op, XMMRegister r) { return !op.is_reg(r); }
 
-void Assembler::AllocateAndInstallRequestedHeapNumbers(LocalIsolate* isolate) {
-  DCHECK_IMPLIES(isolate == nullptr, heap_number_requests_.empty());
-  for (auto& request : heap_number_requests_) {
-    Handle<HeapObject> object =
-        isolate->factory()->NewHeapNumber<AllocationType::kOld>(
-            request.heap_number());
-    Address pc = reinterpret_cast<Address>(buffer_start_) + request.offset();
-    WriteUnalignedValue(pc, object);
-  }
+void Assembler::PatchInHeapNumberRequest(Address pc,
+                                         Handle<HeapNumber> object) {
+  WriteUnalignedValue(pc, object);
 }
 
 // -----------------------------------------------------------------------------
@@ -345,8 +338,12 @@ void Assembler::GetCode(LocalIsolate* isolate, CodeDesc* desc,
   // this point to make CodeDesc initialization less fiddly.
 
   static constexpr int kConstantPoolSize = 0;
+  static constexpr int kBuiltinJumpTableInfoSize = 0;
   const int instruction_size = pc_offset();
-  const int code_comments_offset = instruction_size - code_comments_size;
+  const int builtin_jump_table_info_offset =
+      instruction_size - kBuiltinJumpTableInfoSize;
+  const int code_comments_offset =
+      builtin_jump_table_info_offset - code_comments_size;
   const int constant_pool_offset = code_comments_offset - kConstantPoolSize;
   const int handler_table_offset2 = (handler_table_offset == kNoHandlerTable)
                                         ? constant_pool_offset
@@ -359,7 +356,8 @@ void Assembler::GetCode(LocalIsolate* isolate, CodeDesc* desc,
       static_cast<int>(reloc_info_writer.pos() - buffer_->start());
   CodeDesc::Initialize(desc, this, safepoint_table_offset,
                        handler_table_offset2, constant_pool_offset,
-                       code_comments_offset, reloc_info_offset);
+                       code_comments_offset, builtin_jump_table_info_offset,
+                       reloc_info_offset);
 }
 
 void Assembler::FinalizeJumpOptimizationInfo() {
@@ -408,7 +406,7 @@ void Assembler::Nop(int bytes) {
     switch (bytes) {
       case 2:
         EMIT(0x66);
-        V8_FALLTHROUGH;
+        [[fallthrough]];
       case 1:
         EMIT(0x90);
         return;
@@ -425,7 +423,7 @@ void Assembler::Nop(int bytes) {
         return;
       case 6:
         EMIT(0x66);
-        V8_FALLTHROUGH;
+        [[fallthrough]];
       case 5:
         EMIT(0xF);
         EMIT(0x1F);
@@ -446,15 +444,15 @@ void Assembler::Nop(int bytes) {
       case 11:
         EMIT(0x66);
         bytes--;
-        V8_FALLTHROUGH;
+        [[fallthrough]];
       case 10:
         EMIT(0x66);
         bytes--;
-        V8_FALLTHROUGH;
+        [[fallthrough]];
       case 9:
         EMIT(0x66);
         bytes--;
-        V8_FALLTHROUGH;
+        [[fallthrough]];
       case 8:
         EMIT(0xF);
         EMIT(0x1F);
@@ -1624,8 +1622,8 @@ bool Assembler::is_optimizable_farjmp(int idx) {
   CHECK(jump_opt->is_optimizing());
 
   auto& dict = jump_opt->may_optimizable_farjmp;
-  if (dict.find(idx) != dict.end()) {
-    auto record_jmp_info = dict[idx];
+  if (auto it = dict.find(idx); it != dict.end()) {
+    auto record_jmp_info = it->second;
 
     int record_pos = record_jmp_info.pos;
 
@@ -3351,8 +3349,13 @@ void Assembler::GrowBuffer() {
   base::Vector<uint8_t> instructions{buffer_start_,
                                      static_cast<size_t>(pc_offset())};
   base::Vector<const uint8_t> reloc_info{reloc_info_writer.pos(), reloc_size};
-  for (RelocIterator it(instructions, reloc_info, 0, mode_mask); !it.done();
-       it.next()) {
+  WritableJitAllocation jit_allocation =
+      WritableJitAllocation::ForNonExecutableMemory(
+          reinterpret_cast<Address>(instructions.begin()), instructions.size(),
+          ThreadIsolation::JitAllocationType::kInstructionStream);
+  for (WritableRelocIterator it(jit_allocation, instructions, reloc_info, 0,
+                                mode_mask);
+       !it.done(); it.next()) {
     it.rinfo()->apply(pc_delta);
   }
 

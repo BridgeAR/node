@@ -1,7 +1,6 @@
 // Copyright 2023 the V8 project authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-// Flags: --harmony-intl-duration-format
 
 let h1 = {hours: 1};
 let m2 = {minutes: 2};
@@ -33,13 +32,15 @@ assertEquals(
      '{"type":"literal","value":":"},'+
      '{"type":"integer","value":"03","unit":"second"}]',
      JSON.stringify(df.formatToParts(s3)));
-assertEquals("0:00:00", df.format(ms45));
+assertEquals("0:00:00.045", df.format(ms45));
 assertEquals(
     '[{"type":"integer","value":"0","unit":"hour"},'+
      '{"type":"literal","value":":"},'+
      '{"type":"integer","value":"00","unit":"minute"},'+
      '{"type":"literal","value":":"},'+
-     '{"type":"integer","value":"00","unit":"second"}]',
+     '{"type":"integer","value":"00","unit":"second"},' +
+     '{"type":"decimal","value":".","unit":"second"},' +
+     '{"type":"fraction","value":"045","unit":"second"}]',
      JSON.stringify(df.formatToParts(ms45)));
 
 // With 4 fractional digits

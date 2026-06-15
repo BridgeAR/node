@@ -9,35 +9,26 @@ description: Update packages
 ```bash
 npm update [<pkg>...]
 
-aliases: up, upgrade, udpate
+aliases: u, up, upgrade, udpate
 ```
 
 ### Description
 
-This command will update all the packages listed to the latest version
-(specified by the [`tag` config](/using-npm/config#tag)), respecting the semver
-constraints of both your package and its dependencies (if they also require the
-same package).
+This command will update all the packages listed to the latest version (specified by the [`tag` config](/using-npm/config#tag)), respecting the semver constraints of both your package and its dependencies (if they also require the same package).
 
 It will also install missing packages.
 
-If the `-g` flag is specified, this command will update globally installed
-packages.
+If the `-g` flag is specified, this command will update globally installed packages.
 
-If no package name is specified, all packages in the specified location (global
-or local) will be updated.
+If no package name is specified, all packages in the specified location (global or local) will be updated.
 
-Note that by default `npm update` will not update the semver values of direct
-dependencies in your project `package.json`, if you want to also update
-values in `package.json` you can run: `npm update --save` (or add the
-`save=true` option to a [configuration file](/configuring-npm/npmrc)
-to make that the default behavior).
+Note that by default `npm update` will not update the semver values of direct dependencies in your project `package.json`.
+If you want to also update values in `package.json` you can run: `npm update --save` (or add the `save=true` option to a [configuration file](/configuring-npm/npmrc) to make that the default behavior).
 
 ### Example
 
-For the examples below, assume that the current package is `app` and it depends
-on dependencies, `dep1` (`dep2`, .. etc.).  The published versions of `dep1`
-are:
+For the examples below, assume that the current package is `app` and it depends on dependencies, `dep1` (`dep2`, .. etc.).
+The published versions of `dep1` are:
 
 ```json
 {
@@ -79,9 +70,9 @@ However, if `app`'s `package.json` contains:
 }
 ```
 
-In this case, running `npm update` will install `dep1@1.1.2`.  Even though the
-`latest` tag points to `1.2.2`, this version do not satisfy `~1.1.1`, which is
-equivalent to `>=1.1.1 <1.2.0`.  So the highest-sorting version that satisfies
+In this case, running `npm update` will install `dep1@1.1.2`.
+Even though the `latest` tag points to `1.2.2`, this version does not satisfy `~1.1.1`, which is equivalent to `>=1.1.1 <1.2.0`.
+So the highest-sorting version that satisfies
 `~1.1.1` is used, which is `1.1.2`.
 
 #### Caret Dependencies below 1.0.0
@@ -94,8 +85,7 @@ Suppose `app` has a caret dependency on a version below `1.0.0`, for example:
 }
 ```
 
-`npm update` will install `dep1@0.2.0`, because there are no other
-versions which satisfy `^0.2.0`.
+`npm update` will install `dep1@0.2.0`.
 
 If the dependence were on `^0.4.0`:
 
@@ -105,8 +95,7 @@ If the dependence were on `^0.4.0`:
 }
 ```
 
-Then `npm update` will install `dep1@0.4.1`, because that is the highest-sorting
-version that satisfies `^0.4.0` (`>= 0.4.0 <0.5.0`)
+Then `npm update` will install `dep1@0.4.1`, because that is the highest-sorting version that satisfies `^0.4.0` (`>= 0.4.0 <0.5.0`)
 
 
 #### Subdependencies
@@ -134,26 +123,18 @@ and `dep2` itself depends on this limited range of `dep1`
 }
 ```
 
-Then `npm update` will install `dep1@1.1.2` because that is the highest
-version that `dep2` allows.  npm will prioritize having a single version
-of `dep1` in your tree rather than two when that single version can
-satisfy the semver requirements of multiple dependencies in your tree.
-In this case if you really did need your package to use a newer version
-you would need to use `npm install`.
+Then `npm update` will install `dep1@1.1.2` because that is the highest version that `dep2` allows.
+ npm will prioritize having a single version of `dep1` in your tree rather than two when that single version can satisfy the semver requirements of multiple dependencies in your tree.
+In this case if you really did need your package to use a newer version you would need to use `npm install`.
 
 
 #### Updating Globally-Installed Packages
 
-`npm update -g` will apply the `update` action to each globally installed
-package that is `outdated` -- that is, has a version that is different from
-`wanted`.
+`npm update -g` will apply the `update` action to each globally installed package that is `outdated` -- that is, has a version that is different from `wanted`.
 
-Note: Globally installed packages are treated as if they are installed with a
-caret semver range specified. So if you require to update to `latest` you may
-need to run `npm install -g [<pkg>...]`
+Note: Globally installed packages do not have a `package.json` semver range available, so their `wanted` version is `latest`.
 
-NOTE: If a package has been upgraded to a version newer than `latest`, it will
-be _downgraded_.
+NOTE: If a package has been upgraded to a version newer than `latest`, it will be _downgraded_.
 
 ### Configuration
 
@@ -230,7 +211,7 @@ on deeper dependencies. Sets `--install-strategy=shallow`.
 #### `omit`
 
 * Default: 'dev' if the `NODE_ENV` environment variable is set to
-  'production', otherwise empty.
+  'production'; otherwise, empty.
 * Type: "dev", "optional", or "peer" (can be set multiple times)
 
 Dependency types to omit from the installation tree on disk.
@@ -294,7 +275,8 @@ will also prevent _writing_ `package-lock.json` if `save` is true.
 
 #### `foreground-scripts`
 
-* Default: false
+* Default: `false` unless when using `npm pack` or `npm publish` where it
+  defaults to `true`
 * Type: Boolean
 
 Run all build scripts (ie, `preinstall`, `install`, and `postinstall`)
@@ -314,9 +296,59 @@ but can be useful for debugging.
 If true, npm does not run scripts specified in package.json files.
 
 Note that commands explicitly intended to run a particular script, such as
-`npm start`, `npm stop`, `npm restart`, `npm test`, and `npm run-script`
-will still run their intended script if `ignore-scripts` is set, but they
-will *not* run any pre- or post-scripts.
+`npm start`, `npm stop`, `npm restart`, `npm test`, and `npm run` will still
+run their intended script if `ignore-scripts` is set, but they will *not*
+run any pre- or post-scripts.
+
+
+
+#### `allow-scripts`
+
+* Default: ""
+* Type: String (can be set multiple times)
+
+Comma-separated list of packages whose install-time lifecycle scripts
+(`preinstall`, `install`, `postinstall`, and `prepare` for non-registry
+dependencies) are allowed to run.
+
+This setting is intended for one-off and global contexts: `npm exec`, `npx`,
+and `npm install -g`, where no project `package.json` is involved. For
+team-wide policy in a project, use the `allowScripts` field in
+`package.json` (which also supports explicit denials), or configure it in
+`.npmrc`. Passing `--allow-scripts` on the command line during a
+project-scoped `npm install`, `ci`, `update`, or `rebuild` is an error.
+
+Each name is matched against a dependency's resolved identity, not against
+the package's self-reported name. `--ignore-scripts` and
+`--dangerously-allow-all-scripts` both override this setting.
+
+
+
+#### `strict-allow-scripts`
+
+* Default: false
+* Type: Boolean
+
+If `true`, turn the install-script policy from a warning into a hard error:
+any dependency with install scripts not covered by `allowScripts` will fail
+the install instead of running with a notice.
+
+Dependencies explicitly denied with `false` in `allowScripts` are always
+silently skipped; this setting only affects unreviewed entries.
+`--ignore-scripts` and `--dangerously-allow-all-scripts` both override this
+setting.
+
+
+
+#### `dangerously-allow-all-scripts`
+
+* Default: false
+* Type: Boolean
+
+If `true`, bypass the `allowScripts` policy entirely and run every
+dependency install script regardless of whether it was approved or denied.
+Intended as a migration escape hatch only; its use is strongly discouraged.
+`--ignore-scripts` still takes precedence over this setting.
 
 
 
@@ -331,6 +363,82 @@ documentation for [`npm audit`](/commands/npm-audit) for details on what is
 submitted.
 
 
+
+#### `before`
+
+* Default: null
+* Type: null or Date
+
+If passed to `npm install`, will rebuild the npm tree such that only
+versions that were available **on or before** the given date are installed.
+If there are no versions available for the current set of dependencies, the
+command will error.
+
+If the requested version is a `dist-tag` and the given tag does not pass the
+`--before` filter, the most recent version less than or equal to that tag
+will be used. For example, `foo@latest` might install `foo@1.2` even though
+`latest` is `2.0`.
+
+If `before` and `min-release-age` are both set in the same source, `before`
+wins (an explicit absolute date overrides a relative window). Across
+sources, the standard precedence applies (cli > env > project > user >
+global), so a higher-priority source can always relax or override a
+lower-priority one.
+
+Packages whose names match `min-release-age-exclude` are exempt from this
+filter.
+
+
+
+#### `min-release-age`
+
+* Default: null
+* Type: null or Number
+
+If set, npm will build the npm tree such that only versions that were
+available more than the given number of days ago will be installed. If there
+are no versions available for the current set of dependencies, the command
+will error.
+
+This flag is a complement to `before`, which accepts an exact date instead
+of a relative number of days. The two may coexist (e.g. `min-release-age` in
+your `.npmrc` is preserved when npm internally spawns a sub-process with
+`--before` while preparing a `git:` or `github:` dependency); when both
+apply, `before` wins within a single source and across sources the standard
+precedence rules apply.
+
+Packages whose names match `min-release-age-exclude` are exempt from this
+filter.
+
+This value is not exported to the environment for child processes.
+
+#### `min-release-age-exclude`
+
+* Default:
+* Type: String (can be set multiple times)
+
+A list of package names or `minimatch` glob patterns that are exempt from
+the `min-release-age` (and `before`) filter. A matching package can always
+resolve to its newest version, even when a release-age window is set.
+
+For example, to apply a release-age window to third-party dependencies while
+letting internally maintained packages update immediately:
+
+```
+min-release-age=7
+min-release-age-exclude[]=@myorg/*
+min-release-age-exclude[]=my-internal-pkg
+```
+
+Only the named package is exempt; its own dependencies still follow the
+release-age policy unless they also match a pattern. Patterns match against
+the package name, so `@myorg/*` matches `@myorg/shared-utils`.
+
+Excluding a package does not change which registry it is fetched from. You
+should own your private scope on the public registry so that nobody else can
+publish a package with the same name.
+
+This value is not exported to the environment for child processes.
 
 #### `bin-links`
 

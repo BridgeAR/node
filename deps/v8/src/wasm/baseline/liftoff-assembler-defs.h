@@ -18,7 +18,8 @@ namespace wasm {
 constexpr RegList kLiftoffAssemblerGpCacheRegs = {eax, ecx, edx, esi, edi};
 
 // Omit xmm7, which is the kScratchDoubleReg.
-constexpr DoubleRegList kLiftoffAssemblerFpCacheRegs = {xmm0, xmm1, xmm2, xmm3,
+// Omit xmm0, which is not an allocatable register (see register-ia32.h).
+constexpr DoubleRegList kLiftoffAssemblerFpCacheRegs = {xmm1, xmm2, xmm3,
                                                         xmm4, xmm5, xmm6};
 
 // For the "WasmLiftoffFrameSetup" builtin.
@@ -39,14 +40,6 @@ constexpr DoubleRegList kLiftoffAssemblerFpCacheRegs = {xmm0, xmm1, xmm2, xmm3,
 // For the "WasmLiftoffFrameSetup" builtin.
 constexpr Register kLiftoffFrameSetupFunctionReg = r12;
 
-#elif V8_TARGET_ARCH_MIPS
-
-constexpr RegList kLiftoffAssemblerGpCacheRegs = {a0, a1, a2, a3, t0, t1, t2,
-                                                  t3, t4, t5, t6, s7, v0, v1};
-
-constexpr DoubleRegList kLiftoffAssemblerFpCacheRegs = {
-    f0, f2, f4, f6, f8, f10, f12, f14, f16, f18, f20, f22, f24};
-
 #elif V8_TARGET_ARCH_MIPS64
 
 constexpr RegList kLiftoffAssemblerGpCacheRegs = {a0, a1, a2, a3, a4, a5, a6,
@@ -66,10 +59,11 @@ constexpr RegList kLiftoffAssemblerGpCacheRegs = {a0, a1, a2, a3, a4, a5, a6,
                                                   a7, t0, t1, t2, t3, t4, t5,
                                                   s0, s1, s2, s5, s7};
 
-// f29: zero, f30-f31: macro-assembler scratch float Registers.
+// f29: zero
+// f27-f28 and f30-f31: macro-assembler scratch float Registers.
 constexpr DoubleRegList kLiftoffAssemblerFpCacheRegs = {
-    f0,  f1,  f2,  f3,  f4,  f5,  f6,  f7,  f8,  f9,  f10, f11, f12, f13, f14,
-    f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26, f27, f28};
+    f0,  f1,  f2,  f3,  f4,  f5,  f6,  f7,  f8,  f9,  f10, f11, f12, f13,
+    f14, f15, f16, f17, f18, f19, f20, f21, f22, f23, f24, f25, f26};
 
 // For the "WasmLiftoffFrameSetup" builtin.
 constexpr Register kLiftoffFrameSetupFunctionReg = t0;
@@ -95,10 +89,11 @@ constexpr RegList kLiftoffAssemblerGpCacheRegs = {
     x0,  x1,  x2,  x3,  x4,  x5,  x6,  x7,  x8,  x9,  x10, x11,
     x12, x13, x14, x15, x19, x20, x21, x22, x23, x24, x25, x27};
 
-// d15: fp_zero, d30-d31: macro-assembler scratch V Registers.
+// d15: fp_zero, d28-d31: not allocatable registers, d30-d31: macro-assembler
+// scratch V Registers.
 constexpr DoubleRegList kLiftoffAssemblerFpCacheRegs = {
-    d0,  d1,  d2,  d3,  d4,  d5,  d6,  d7,  d8,  d9,  d10, d11, d12, d13, d14,
-    d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27, d28, d29};
+    d0,  d1,  d2,  d3,  d4,  d5,  d6,  d7,  d8,  d9,  d10, d11, d12, d13,
+    d14, d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27};
 
 // For the "WasmLiftoffFrameSetup" builtin.
 constexpr Register kLiftoffFrameSetupFunctionReg = x8;
@@ -129,7 +124,7 @@ constexpr Register kLiftoffFrameSetupFunctionReg = r15;
 // Any change of kLiftoffAssemblerGpCacheRegs also need to update
 // kPushedGpRegs in frame-constants-riscv.h
 constexpr RegList kLiftoffAssemblerGpCacheRegs = {a0, a1, a2, a3, a4, a5,
-                                                  a6, a7, t0, t1, t2, s7};
+                                                  a6, a7, s2, t1, t2, s7};
 
 // Any change of kLiftoffAssemblerGpCacheRegs also need to update
 // kPushedFpRegs in frame-constants-riscv.h
@@ -140,7 +135,7 @@ constexpr DoubleRegList kLiftoffAssemblerFpCacheRegs = {
     fa3, fa4, fa5, fa6, fa7, ft8, ft9, ft10, ft11};
 
 // For the "WasmLiftoffFrameSetup" builtin.
-constexpr Register kLiftoffFrameSetupFunctionReg = t0;
+constexpr Register kLiftoffFrameSetupFunctionReg = s2;
 #else
 
 constexpr RegList kLiftoffAssemblerGpCacheRegs = RegList::FromBits(0xff);
@@ -150,7 +145,7 @@ constexpr DoubleRegList kLiftoffAssemblerFpCacheRegs =
 
 #endif
 
-static_assert(kLiftoffFrameSetupFunctionReg != kWasmInstanceRegister);
+static_assert(kLiftoffFrameSetupFunctionReg != kWasmImplicitArgRegister);
 static_assert(kLiftoffFrameSetupFunctionReg != kRootRegister);
 #ifdef V8_COMPRESS_POINTERS
 static_assert(kLiftoffFrameSetupFunctionReg != kPtrComprCageBaseRegister);

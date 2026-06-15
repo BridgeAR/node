@@ -1,13 +1,17 @@
 'use strict';
 const common = require('../common');
-if (!common.hasCrypto)
+if (!common.hasCrypto) {
   common.skip('missing crypto');
+}
 
 const assert = require('assert');
 const crypto = require('crypto');
+const {
+  hasOpenSSL3,
+} = require('../common/crypto');
 
 {
-  const size = common.hasFipsCrypto || common.hasOpenSSL3 ? 1024 : 256;
+  const size = crypto.getFips() || hasOpenSSL3 ? 1024 : 256;
   const dh1 = crypto.createDiffieHellman(size);
   const p1 = dh1.getPrime('buffer');
   const dh2 = crypto.createDiffieHellman(p1, 'buffer');
@@ -53,20 +57,19 @@ const crypto = require('crypto');
   assert.strictEqual(secret1, secret4);
 
   let wrongBlockLength;
-  if (common.hasOpenSSL3) {
+  if (hasOpenSSL3) {
     wrongBlockLength = {
-      message: 'error:1C80006B:Provider routines::wrong final block length',
-      code: 'ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH',
-      library: 'Provider routines',
-      reason: 'wrong final block length'
+      message: /wrong[\s_]final[\s_]block[\s_]length/i,
+      code: /ERR_OSSL_(EVP_)?WRONG_FINAL_BLOCK_LENGTH/,
+      library: /Provider routines|Cipher functions/,
+      reason: /wrong[\s_]final[\s_]block[\s_]length/i,
     };
   } else {
     wrongBlockLength = {
-      message: 'error:0606506D:digital envelope' +
-        ' routines:EVP_DecryptFinal_ex:wrong final block length',
-      code: 'ERR_OSSL_EVP_WRONG_FINAL_BLOCK_LENGTH',
-      library: 'digital envelope routines',
-      reason: 'wrong final block length'
+      message: /wrong[\s_]final[\s_]block[\s_]length/i,
+      code: /ERR_OSSL_(EVP_)?WRONG_FINAL_BLOCK_LENGTH/,
+      library: /digital envelope routines|Cipher functions/,
+      reason: /wrong[\s_]final[\s_]block[\s_]length/i,
     };
   }
 
@@ -86,12 +89,10 @@ const crypto = require('crypto');
   }
 
   {
-    const v = crypto.constants.OPENSSL_VERSION_NUMBER;
-    const hasOpenSSL3WithNewErrorMessage = (v >= 0x300000c0 && v <= 0x30100000) || (v >= 0x30100040 && v <= 0x30200000);
     assert.throws(() => {
       dh3.computeSecret('');
-    }, { message: common.hasOpenSSL3 && !hasOpenSSL3WithNewErrorMessage ?
-      'error:02800080:Diffie-Hellman routines::invalid secret' :
+    }, { message: process.features.openssl_is_boringssl ?
+      'Supplied key is invalid' :
       'Supplied key is too small' });
   }
 }
@@ -99,10 +100,24 @@ const crypto = require('crypto');
 // Through a fluke of history, g=0 defaults to DH_GENERATOR (2).
 {
   const g = 0;
-  crypto.createDiffieHellman('abcdef', g);
+  if (process.features.openssl_is_boringssl) {
+    assert.throws(() => crypto.createDiffieHellman('abcdef', g), {
+      code: 'ERR_CRYPTO_OPERATION_FAILED',
+      name: 'Error'
+    });
+  } else {
+    crypto.createDiffieHellman('abcdef', g);
+  }
   crypto.createDiffieHellman('abcdef', 'hex', g);
 }
 
 {
-  crypto.createDiffieHellman('abcdef', Buffer.from([2]));  // OK
+  if (process.features.openssl_is_boringssl) {
+    assert.throws(() => crypto.createDiffieHellman('abcdef', Buffer.from([2])), {
+      code: 'ERR_CRYPTO_OPERATION_FAILED',
+      name: 'Error'
+    });
+  } else {
+    crypto.createDiffieHellman('abcdef', Buffer.from([2]));  // OK
+  }
 }

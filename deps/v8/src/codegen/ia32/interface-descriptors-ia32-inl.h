@@ -19,8 +19,9 @@ constexpr auto CallInterfaceDescriptor::DefaultRegisterArray() {
 }
 
 constexpr auto CallInterfaceDescriptor::DefaultDoubleRegisterArray() {
-  // xmm0 isn't allocatable.
-  auto registers = DoubleRegisterArray(xmm1, xmm2, xmm3, xmm4, xmm5, xmm6);
+  // xmm7 isn't allocatable.
+  auto registers =
+      DoubleRegisterArray(xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6);
   return registers;
 }
 
@@ -80,6 +81,21 @@ constexpr Register KeyedLoadWithVectorDescriptor::VectorRegister() {
 }
 
 // static
+constexpr Register EnumeratedKeyedLoadBaselineDescriptor::EnumIndexRegister() {
+  return ecx;
+}
+
+// static
+constexpr Register EnumeratedKeyedLoadBaselineDescriptor::CacheTypeRegister() {
+  return no_reg;
+}
+
+// static
+constexpr Register EnumeratedKeyedLoadBaselineDescriptor::SlotRegister() {
+  return no_reg;
+}
+
+// static
 constexpr Register KeyedHasICBaselineDescriptor::ReceiverRegister() {
   return kInterpreterAccumulatorRegister;
 }
@@ -120,9 +136,9 @@ constexpr Register DefineKeyedOwnDescriptor::FlagsRegister() { return no_reg; }
 constexpr Register StoreTransitionDescriptor::MapRegister() { return edi; }
 
 // static
-constexpr Register ApiGetterDescriptor::HolderRegister() { return ecx; }
+constexpr Register CallApiGetterDescriptor::NameRegister() { return edi; }
 // static
-constexpr Register ApiGetterDescriptor::CallbackRegister() { return eax; }
+constexpr Register CallApiGetterDescriptor::CallbackRegister() { return eax; }
 
 // static
 constexpr Register GrowArrayElementsDescriptor::ObjectRegister() { return eax; }
@@ -189,6 +205,14 @@ constexpr auto CallFunctionTemplateDescriptor::registers() {
   // edx : function template info
   // ecx : number of arguments (on the stack)
   return RegisterArray(edx, ecx);
+}
+
+// static
+constexpr auto CallFunctionTemplateGenericDescriptor::registers() {
+  // edx: the function template info
+  // ecx: number of arguments (on the stack)
+  // edi: topmost script-having context
+  return RegisterArray(edx, ecx, edi);
 }
 
 // static
@@ -264,6 +288,11 @@ constexpr auto Compare_BaselineDescriptor::registers() {
 }
 
 // static
+constexpr auto Compare_WithEmbeddedFeedbackOffsetDescriptor::registers() {
+  return RegisterArray(edx, eax, ecx);
+}
+
+// static
 constexpr auto BinaryOpDescriptor::registers() {
   return RegisterArray(edx, eax);
 }
@@ -289,12 +318,9 @@ CallApiCallbackOptimizedDescriptor::ActualArgumentsCountRegister() {
   return ecx;
 }
 // static
-constexpr Register CallApiCallbackOptimizedDescriptor::CallDataRegister() {
+constexpr Register
+CallApiCallbackOptimizedDescriptor::FunctionTemplateInfoRegister() {
   return edx;
-}
-// static
-constexpr Register CallApiCallbackOptimizedDescriptor::HolderRegister() {
-  return edi;
 }
 
 // static
@@ -303,12 +329,14 @@ CallApiCallbackGenericDescriptor::ActualArgumentsCountRegister() {
   return ecx;
 }
 // static
-constexpr Register CallApiCallbackGenericDescriptor::CallHandlerInfoRegister() {
-  return edx;
+constexpr Register
+CallApiCallbackGenericDescriptor::TopmostScriptHavingContextRegister() {
+  return eax;
 }
 // static
-constexpr Register CallApiCallbackGenericDescriptor::HolderRegister() {
-  return edi;
+constexpr Register
+CallApiCallbackGenericDescriptor::FunctionTemplateInfoRegister() {
+  return edx;
 }
 
 // static
@@ -329,6 +357,12 @@ constexpr auto InterpreterPushArgsThenCallDescriptor::registers() {
 constexpr auto InterpreterPushArgsThenConstructDescriptor::registers() {
   return RegisterArray(eax,   // argument count
                        ecx);  // address of first argument
+}
+
+// static
+constexpr auto ConstructForwardAllArgsDescriptor::registers() {
+  return RegisterArray(edi,   // the constructor
+                       edx);  // the new target
 }
 
 // static

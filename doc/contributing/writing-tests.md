@@ -21,16 +21,28 @@ Add tests when:
 ## Test directory structure
 
 See [directory structure overview][] for outline of existing test and locations.
-When deciding on whether to expand an existing test file or create a new one,
-consider going through the files related to the subsystem.
-For example, look for `test-streams` when writing a test for `lib/streams.js`.
+
+## How to write a good test
+
+A good test should be written in a style that is optimal for debugging
+when it fails.
+
+In principle, when adding a new test, it should be placed in a new file.
+Unless there is strong motivation to do so, refrain from appending
+new test cases to an existing file. Similar to the reproductions we ask
+for in the issue tracker, a good test should be as minimal and isolated as
+possible to facilitate debugging.
+
+A good test should come with comments explaining what it tries to test,
+so that when it fails, other contributors can fix it with the full context
+of its intention, and be able to modify it in good confidence when the context
+changes.
 
 ## Test structure
 
 Let's analyze this basic test from the Node.js test suite:
 
 ```js
-'use strict';                                                          // 1
 const common = require('../common');                                   // 2
 const fixtures = require('../common/fixtures');                        // 3
 
@@ -58,7 +70,6 @@ server.listen(0, () => {                                               // 14
 ### **Lines 1-3**
 
 ```js
-'use strict';
 const common = require('../common');
 const fixtures = require('../common/fixtures');
 ```
@@ -171,7 +182,6 @@ avoid the use of extra variables and the corresponding assertions. Let's
 explain this with a real test from the test suite.
 
 ```js
-'use strict';
 require('../common');
 const assert = require('node:assert');
 const http = require('node:http');
@@ -205,7 +215,6 @@ const server = http.createServer((req, res) => {
 This test could be greatly simplified by using `common.mustCall` like this:
 
 ```js
-'use strict';
 const common = require('../common');
 const http = require('node:http');
 
@@ -275,8 +284,6 @@ test followed by the flags. For example, to allow a test to require some of the
 A test that would require `internal/freelist` could start like this:
 
 ```js
-'use strict';
-
 // Flags: --expose-internals
 
 require('../common');
@@ -471,6 +478,11 @@ To generate a test coverage report, see the
 
 Nightly coverage reports for the Node.js `main` branch are available at
 <https://coverage.nodejs.org/>.
+
+## Running tests
+
+See the [Building guide](../../BUILDING.md#running-tests) for details on how to
+run tests.
 
 [ASCII]: https://man7.org/linux/man-pages/man7/ascii.7.html
 [Google Test]: https://github.com/google/googletest

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/base/iterator.h"
 #include "src/execution/isolate.h"
 #include "src/heap/marking-state-inl.h"
 #include "test/unittests/heap/heap-utils.h"
@@ -17,11 +18,11 @@ namespace {
 
 class PagePromotionTest : public TestWithHeapInternalsAndContext {};
 
-Page* FindPageInNewSpace(const std::vector<Handle<FixedArray>>& handles) {
-  for (auto rit = handles.rbegin(); rit != handles.rend(); ++rit) {
+NormalPage* FindPageInNewSpace(const std::vector<Handle<FixedArray>>& handles) {
+  for (Handle<FixedArray> handle : base::Reversed(handles)) {
     // One deref gets the Handle, the second deref gets the FixedArray.
-    Page* candidate = Page::FromHeapObject(**rit);
-    if (candidate->InNewSpace() &&
+    NormalPage* candidate = NormalPage::FromHeapObject(*handle);
+    if (candidate->Chunk()->InNewSpace() &&
         candidate->heap()->new_space()->IsPromotionCandidate(candidate))
       return candidate;
   }
@@ -59,7 +60,7 @@ TEST_F(PagePromotionTest, PagePromotion_NewToOld) {
     SimulateFullSpace(heap->new_space(), &handles);
     if (v8_flags.minor_ms) InvokeMinorGC();
     CHECK_GT(handles.size(), 0u);
-    Page* const to_be_promoted_page = FindPageInNewSpace(handles);
+    NormalPage* const to_be_promoted_page = FindPageInNewSpace(handles);
     CHECK_NOT_NULL(to_be_promoted_page);
     CHECK(heap->new_space()->IsPromotionCandidate(to_be_promoted_page));
     // To perform a sanity check on live bytes we need to mark the heap.
@@ -72,11 +73,13 @@ TEST_F(PagePromotionTest, PagePromotion_NewToOld) {
 
     // Actual checks: The page is in new space first, but is moved to old space
     // during a full GC.
-    CHECK(heap->new_space()->ContainsSlow(to_be_promoted_page->address()));
-    CHECK(!heap->old_space()->ContainsSlow(to_be_promoted_page->address()));
+    CHECK(heap->new_space()->ContainsSlow(to_be_promoted_page->ChunkAddress()));
+    CHECK(
+        !heap->old_space()->ContainsSlow(to_be_promoted_page->ChunkAddress()));
     EmptyNewSpaceUsingGC();
-    CHECK(!heap->new_space()->ContainsSlow(to_be_promoted_page->address()));
-    CHECK(heap->old_space()->ContainsSlow(to_be_promoted_page->address()));
+    CHECK(
+        !heap->new_space()->ContainsSlow(to_be_promoted_page->ChunkAddress()));
+    CHECK(heap->old_space()->ContainsSlow(to_be_promoted_page->ChunkAddress()));
   }
 }
 

@@ -41,8 +41,10 @@ void BreakableControlFlowBuilder::EmitJumpIfUndefined(BytecodeLabels* sites) {
   builder()->JumpIfUndefined(sites->New());
 }
 
-void BreakableControlFlowBuilder::EmitJumpIfNull(BytecodeLabels* sites) {
-  builder()->JumpIfNull(sites->New());
+void BreakableControlFlowBuilder::EmitJumpIfForInDone(BytecodeLabels* sites,
+                                                      Register index,
+                                                      Register cache_length) {
+  builder()->JumpIfForInDone(sites->New(), index, cache_length);
 }
 
 LoopBuilder::~LoopBuilder() {
@@ -124,8 +126,9 @@ void SwitchBuilder::EmitJumpTableIfExists(
     int min_case, int max_case, std::map<int, CaseClause*>& covered_cases) {
   builder()->SwitchOnSmiNoFeedback(jump_table_);
   fall_through_.Bind(builder());
+  // Bind any uncovered cases.
   for (int j = min_case; j <= max_case; ++j) {
-    if (covered_cases.find(j) == covered_cases.end()) {
+    if (!covered_cases.contains(j)) {
       this->BindCaseTargetForJumpTable(j, nullptr);
     }
   }
@@ -206,6 +209,43 @@ void TryFinallyBuilder::BeginFinally() {
 
 void TryFinallyBuilder::EndFinally() {
   // Nothing to be done here.
+}
+
+ConditionalChainControlFlowBuilder::~ConditionalChainControlFlowBuilder() {
+  end_labels_.Bind(builder());
+#ifdef DEBUG
+  DCHECK(end_labels_.empty() || end_labels_.is_bound());
+
+  for (auto* label : then_labels_list_) {
+    DCHECK(label->empty() || label->is_bound());
+  }
+
+  for (auto* label : else_labels_list_) {
+    DCHECK(label->empty() || label->is_bound());
+  }
+#endif
+}
+
+void ConditionalChainControlFlowBuilder::JumpToEnd() {
+  builder()->Jump(end_labels_.New());
+}
+
+void ConditionalChainControlFlowBuilder::ThenAt(size_t index) {
+  DCHECK_LT(index, then_labels_list_.length());
+  then_labels_at(index)->Bind(builder());
+  if (block_coverage_builder_) {
+    block_coverage_builder_->IncrementBlockCounter(
+        block_coverage_then_slot_at(index));
+  }
+}
+
+void ConditionalChainControlFlowBuilder::ElseAt(size_t index) {
+  DCHECK_LT(index, else_labels_list_.length());
+  else_labels_at(index)->Bind(builder());
+  if (block_coverage_builder_) {
+    block_coverage_builder_->IncrementBlockCounter(
+        block_coverage_else_slot_at(index));
+  }
 }
 
 ConditionalControlFlowBuilder::~ConditionalControlFlowBuilder() {

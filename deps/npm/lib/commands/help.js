@@ -1,20 +1,19 @@
 const spawn = require('@npmcli/promise-spawn')
-const path = require('path')
-const openUrl = require('../utils/open-url.js')
+const path = require('node:path')
+const { openUrl } = require('../utils/open-url.js')
 const { glob } = require('glob')
+const { output, input } = require('proc-log')
 const localeCompare = require('@isaacs/string-locale-compare')('en')
 const { deref } = require('../utils/cmd-list.js')
+const BaseCommand = require('../base-cmd.js')
 
 const globify = pattern => pattern.split('\\').join('/')
-const BaseCommand = require('../base-command.js')
 
 // Strips out the number from foo.7 or foo.7. or foo.7.tgz
-// We don't currently compress our man pages but if we ever did this would
-// seamlessly continue supporting it
+// We don't currently compress our man pages but if we ever did this would seamlessly continue supporting it
 const manNumberRegex = /\.(\d+)(\.[^/\\]*)?$/
-// hardcoded names for mansections
-// XXX: these are used in the docs workspace and should be exported
-// from npm so section names can changed more easily
+// hardcoded names for man sections
+// XXX: these are used in the docs workspace and should be exported from npm so section names can changed more easily
 const manSectionNames = {
   1: 'commands',
   5: 'configuring-npm',
@@ -45,12 +44,11 @@ class Help extends BaseCommand {
   }
 
   async exec (args) {
-    // By default we search all of our man subdirectories, but if the user has
-    // asked for a specific one we limit the search to just there
+    // By default we search all of our man subdirectories, but if the user has asked for a specific one we limit the search to just there
     const manSearch = /^\d+$/.test(args[0]) ? `man${args.shift()}` : 'man*'
 
     if (!args.length) {
-      return this.npm.output(this.npm.usage)
+      return output.standard(this.npm.usage)
     }
 
     // npm help foo bar baz: search topics
@@ -65,8 +63,7 @@ class Help extends BaseCommand {
     const f = globify(path.resolve(this.npm.npmRoot, `man/${manSearch}/?(npm-)${arg}.[0-9]*`))
 
     const [man] = await glob(f).then(r => r.sort((a, b) => {
-      // Because the glob is (subtly) different from manNumberRegex,
-      // we can't rely on it passing.
+      // Because the glob is (subtly) different from manNumberRegex, we can't rely on it passing.
       const aManNumberMatch = a.match(manNumberRegex)?.[1] || 999
       const bManNumberMatch = b.match(manNumberRegex)?.[1] || 999
       if (aManNumberMatch !== bManNumberMatch) {
@@ -94,13 +91,15 @@ class Help extends BaseCommand {
       args = ['emacsclient', ['-e', `(woman-find-file '${man}')`]]
     }
 
-    return spawn(...args, { stdio: 'inherit' }).catch(err => {
+    try {
+      await input.start(() => spawn(...args, { stdio: 'inherit' }))
+    } catch (err) {
       if (err.code) {
         throw new Error(`help process exited with code: ${err.code}`)
       } else {
         throw err
       }
-    })
+    }
   }
 
   // Returns the path to the html version of the man page
@@ -110,4 +109,5 @@ class Help extends BaseCommand {
     return 'file:///' + path.resolve(this.npm.npmRoot, `docs/output/${sect}/${f}.html`)
   }
 }
+
 module.exports = Help

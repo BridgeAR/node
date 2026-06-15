@@ -1,5 +1,6 @@
 #include "base_object.h"
 #include "env-inl.h"
+#include "memory_tracker-inl.h"
 #include "node_messaging.h"
 #include "node_realm-inl.h"
 
@@ -10,6 +11,7 @@ using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Just;
+using v8::JustVoid;
 using v8::Local;
 using v8::Maybe;
 using v8::Object;
@@ -23,15 +25,13 @@ BaseObject::BaseObject(Realm* realm, Local<Object> object)
   CHECK_EQ(false, object.IsEmpty());
   CHECK_GE(object->InternalFieldCount(), BaseObject::kInternalFieldCount);
   SetInternalFields(realm->isolate_data(), object, static_cast<void*>(this));
-  realm->AddCleanupHook(DeleteMe, static_cast<void*>(this));
-  realm->modify_base_object_count(1);
+  realm->TrackBaseObject(this);
 }
 
 BaseObject::~BaseObject() {
-  realm()->modify_base_object_count(-1);
-  realm()->RemoveCleanupHook(DeleteMe, static_cast<void*>(this));
+  realm()->UntrackBaseObject(this);
 
-  if (UNLIKELY(has_pointer_data())) {
+  if (has_pointer_data()) [[unlikely]] {
     PointerData* metadata = pointer_data();
     CHECK_EQ(metadata->strong_ptr_count, 0);
     metadata->self = nullptr;
@@ -45,7 +45,8 @@ BaseObject::~BaseObject() {
 
   {
     HandleScope handle_scope(realm()->isolate());
-    object()->SetAlignedPointerInInternalField(BaseObject::kSlot, nullptr);
+    object()->SetAlignedPointerInInternalField(
+        BaseObject::kSlot, nullptr, EmbedderDataTag::kDefault);
   }
 }
 
@@ -81,15 +82,16 @@ void BaseObject::LazilyInitializedJSTemplateConstructor(
 }
 
 Local<FunctionTemplate> BaseObject::MakeLazilyInitializedJSTemplate(
-    Environment* env) {
-  return MakeLazilyInitializedJSTemplate(env->isolate_data());
+    Environment* env, int internal_field_count) {
+  return MakeLazilyInitializedJSTemplate(env->isolate_data(),
+                                         internal_field_count);
 }
 
 Local<FunctionTemplate> BaseObject::MakeLazilyInitializedJSTemplate(
-    IsolateData* isolate_data) {
+    IsolateData* isolate_data, int internal_field_count) {
   Local<FunctionTemplate> t = NewFunctionTemplate(
       isolate_data->isolate(), LazilyInitializedJSTemplateConstructor);
-  t->InstanceTemplate()->SetInternalFieldCount(BaseObject::kInternalFieldCount);
+  t->InstanceTemplate()->SetInternalFieldCount(internal_field_count);
   return t;
 }
 
@@ -110,9 +112,9 @@ Maybe<std::vector<BaseObjectPtr<BaseObject>>> BaseObject::NestedTransferables()
   return Just(std::vector<BaseObjectPtr<BaseObject>>{});
 }
 
-Maybe<bool> BaseObject::FinalizeTransferRead(Local<Context> context,
+Maybe<void> BaseObject::FinalizeTransferRead(Local<Context> context,
                                              ValueDeserializer* deserializer) {
-  return Just(true);
+  return JustVoid();
 }
 
 BaseObject::PointerData* BaseObject::pointer_data() {
@@ -146,12 +148,11 @@ void BaseObject::increase_refcount() {
     persistent_handle_.ClearWeak();
 }
 
-void BaseObject::DeleteMe(void* data) {
-  BaseObject* self = static_cast<BaseObject*>(data);
-  if (self->has_pointer_data() && self->pointer_data()->strong_ptr_count > 0) {
-    return self->Detach();
+void BaseObject::DeleteMe() {
+  if (has_pointer_data() && pointer_data()->strong_ptr_count > 0) {
+    return Detach();
   }
-  delete self;
+  delete this;
 }
 
 bool BaseObject::IsDoneInitializing() const {
@@ -162,12 +163,29 @@ Local<Object> BaseObject::WrappedObject() const {
   return object();
 }
 
-bool BaseObject::IsRootNode() const {
-  return !persistent_handle_.IsWeak();
-}
-
 bool BaseObject::IsNotIndicativeOfMemoryLeakAtExit() const {
   return IsWeakOrDetached();
 }
+
+void BaseObjectList::Cleanup() {
+  while (!IsEmpty()) {
+    BaseObject* bo = PopFront();
+    bo->DeleteMe();
+  }
+}
+
+void BaseObjectList::MemoryInfo(MemoryTracker* tracker) const {
+  for (auto bo : *this) {
+    if (bo->IsDoneInitializing()) {
+      // TODO(addaleax): Add weak edges instead of no edges once
+      // https://github.com/v8/v8/commit/e37cadf1143a8c5bbe44c0408186b5a26cc23863
+      // is available for us
+      tracker->Track(
+          bo, bo->persistent().IsWeak() ? MemoryTracker::kWeakEdge : nullptr);
+    }
+  }
+}
+
+const char* const MemoryTracker::kWeakEdge = "<MemoryTracker::kWeakEdge>";
 
 }  // namespace node

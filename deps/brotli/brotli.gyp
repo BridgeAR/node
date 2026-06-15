@@ -6,13 +6,16 @@
       'c/common/context.c',
       'c/common/dictionary.c',
       'c/common/platform.c',
+      'c/common/shared_dictionary.c',
       'c/common/transform.c',
 
       # Decoder
       'c/dec/bit_reader.c',
       'c/dec/decode.c',
       'c/dec/huffman.c',
+      'c/dec/prefix.c',
       'c/dec/state.c',
+      'c/dec/static_init.c',
 
       # Encoder
       'c/enc/backward_references.c',
@@ -22,6 +25,7 @@
       'c/enc/brotli_bit_stream.c',
       'c/enc/cluster.c',
       'c/enc/command.c',
+      'c/enc/compound_dictionary.c',
       'c/enc/compress_fragment.c',
       'c/enc/compress_fragment_two_pass.c',
       'c/enc/dictionary_hash.c',
@@ -34,6 +38,8 @@
       'c/enc/memory.c',
       'c/enc/metablock.c',
       'c/enc/static_dict.c',
+      'c/enc/static_dict_lut.c',
+      'c/enc/static_init.c',
       'c/enc/utf8_util.c',
     ]
   },
@@ -57,14 +63,15 @@
           'defines': [
             'OS_MACOSX'
           ]
+        }, {
+          'libraries': [
+            '-lm',
+          ],
         }],
       ],
       'direct_dependent_settings': {
         'include_dirs': [ 'c/include' ]
       },
-      'libraries': [
-        '-lm',
-      ],
       'sources': [
         '<@(brotli_sources)',
       ]

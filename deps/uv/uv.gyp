@@ -62,7 +62,6 @@
     'uv_sources_win': [
       'include/uv/win.h',
       'src/win/async.c',
-      'src/win/atomicops-inl.h',
       'src/win/core.c',
       'src/win/detect-wakeup.c',
       'src/win/dl.c',
@@ -124,6 +123,7 @@
     'uv_sources_apple': [
       'src/unix/darwin.c',
       'src/unix/fsevents.c',
+      'src/unix/darwin-syscalls.h',
       'src/unix/darwin-proctitle.c',
       'src/unix/random-getentropy.c',
     ],
@@ -172,7 +172,7 @@
         ],
         'include_dirs': [ 'include' ],
         'conditions': [
-          ['OS == "linux"', {
+          ['OS == "linux" or OS=="openharmony"', {
             'defines': [ '_POSIX_C_SOURCE=200112' ],
           }],
         ],
@@ -189,7 +189,7 @@
           '-Wno-unused-parameter',
           '-Wstrict-prototypes',
         ],
-        'OTHER_CFLAGS': [ '-g', '--std=gnu89' ],
+        'OTHER_CFLAGS': [ '-g', '--std=gnu11' ],
       },
       'conditions': [
         [ 'OS=="win"', {
@@ -219,7 +219,6 @@
             '<@(uv_sources_posix)',
           ],
           'link_settings': {
-            'libraries': [ '-lm' ],
             'conditions': [
               ['OS=="solaris"', {
                 'ldflags': [ '-pthreads' ],
@@ -229,6 +228,11 @@
               }],
               ['OS != "solaris" and OS != "android" and OS != "zos"', {
                 'ldflags': [ '-pthread' ],
+              }],
+              ['OS!="mac"', {
+                'libraries': [
+                  '-lm'
+                ],
               }],
             ],
           },
@@ -250,14 +254,14 @@
             }],
           ],
         }],
-        [ 'OS in "linux mac ios android zos"', {
+        [ 'OS in "linux mac ios android zos openharmony"', {
           'sources': [ 'src/unix/proctitle.c' ],
         }],
         [ 'OS != "zos"', {
           'cflags': [
             '-fvisibility=hidden',
             '-g',
-            '--std=gnu89',
+            '--std=gnu11',
             '-Wall',
             '-Wextra',
             '-Wno-unused-parameter',
@@ -274,7 +278,7 @@
             '_DARWIN_UNLIMITED_SELECT=1',
           ]
         }],
-        [ 'OS=="linux"', {
+        [ 'OS=="linux" or OS=="openharmony"', {
           'defines': [ '_GNU_SOURCE' ],
           'sources': [
             '<@(uv_sources_linux)',

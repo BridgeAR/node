@@ -52,6 +52,9 @@ using ReturnAddressLocationResolver =
 using DcheckErrorCallback = void (*)(const char* file, int line,
                                      const char* message);
 
+using V8FatalErrorCallback = void (*)(const char* file, int line,
+                                      const char* message);
+
 /**
  * Container class for static utility functions.
  */
@@ -77,6 +80,12 @@ class V8_EXPORT V8 {
   /** Set the callback to invoke in case of Dcheck failures. */
   static void SetDcheckErrorHandler(DcheckErrorCallback that);
 
+  /** Set the callback to invoke in the case of CHECK failures or fatal
+   * errors. This is distinct from Isolate::SetFatalErrorHandler, which
+   * is invoked in response to API usage failures.
+   * */
+  static void SetFatalErrorHandler(V8FatalErrorCallback that);
+
   /**
    * Sets V8 flags from a string.
    */
@@ -97,10 +106,24 @@ class V8_EXPORT V8 {
    * is created. It always returns true.
    */
   V8_INLINE static bool Initialize() {
+#ifdef V8_TARGET_OS_ANDROID
+    const bool kV8TargetOsIsAndroid = true;
+#else
+    const bool kV8TargetOsIsAndroid = false;
+#endif
+
+#ifdef V8_ENABLE_CHECKS
+    const bool kV8EnableChecks = true;
+#else
+    const bool kV8EnableChecks = false;
+#endif
+
     const int kBuildConfiguration =
         (internal::PointerCompressionIsEnabled() ? kPointerCompression : 0) |
         (internal::SmiValuesAre31Bits() ? k31BitSmis : 0) |
-        (internal::SandboxIsEnabled() ? kSandbox : 0);
+        (internal::SandboxIsEnabled() ? kSandbox : 0) |
+        (kV8TargetOsIsAndroid ? kTargetOsIsAndroid : 0) |
+        (kV8EnableChecks ? kEnableChecks : 0);
     return Initialize(kBuildConfiguration);
   }
 
@@ -230,6 +253,35 @@ class V8_EXPORT V8 {
   static size_t GetSandboxReservationSizeInBytes();
 #endif  // V8_ENABLE_SANDBOX
 
+  enum class WasmMemoryType {
+    kMemory32,
+    kMemory64,
+  };
+
+  /**
+   * Returns the virtual address space reservation size (in bytes) needed
+   * for one WebAssembly memory instance of the given capacity.
+   *
+   * \param type Whether this is a memory32 or memory64 instance.
+   * \param byte_capacity The maximum size, in bytes, of the WebAssembly
+   *   memory. Values exceeding the engine's maximum allocatable memory
+   *   size for the given type (determined by max_mem32_pages or
+   *   max_mem64_pages) are clamped.
+   *
+   * When trap-based bounds checking is enabled by
+   * EnableWebAssemblyTrapHandler(), the amount of virtual address space
+   * that V8 needs to reserve for each WebAssembly memory instance can
+   * be much bigger than the requested size. If the process does
+   * not have enough virtual memory available, WebAssembly memory allocation
+   * would fail. During the initialization of V8, embedders can use this method
+   * to estimate whether the process has enough virtual memory for their
+   * usage of WebAssembly, and decide whether to enable the trap handler
+   * via EnableWebAssemblyTrapHandler(), or to skip it and reduce the amount of
+   * virtual memory required to keep the application running.
+   */
+  static size_t GetWasmMemoryReservationSizeInBytes(WasmMemoryType type,
+                                                    size_t byte_capacity);
+
   /**
    * Activate trap-based bounds checking for WebAssembly.
    *
@@ -271,6 +323,8 @@ class V8_EXPORT V8 {
     kPointerCompression = 1 << 0,
     k31BitSmis = 1 << 1,
     kSandbox = 1 << 2,
+    kTargetOsIsAndroid = 1 << 3,
+    kEnableChecks = 1 << 4,
   };
 
   /**

@@ -1,9 +1,3 @@
-# Copyright (c) 2013-2019 GitHub Inc.
-# Copyright 2019 the V8 project authors. All rights reserved.
-# Copyright 2023 Microsoft Inc.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
-
 # This file is used by GN for building, which is NOT the build system used for
 # building official binaries.
 # Please take a look at node.gyp if you are making changes to build system.
@@ -15,6 +9,11 @@ import("$node_v8_path/gni/v8.gni")
 # The actual configurations are put inside a template in unofficial.gni to
 # prevent accidental edits from contributors.
 template("node_gn_build") {
+  assert(!node_use_ffi,
+         "The unofficial GN build does not support node:ffi yet.")
+  assert(!node_shared_ffi,
+         "The unofficial GN build does not support shared libffi.")
+
   config("node_features") {
     defines = []
     if (is_component_build) {
@@ -27,6 +26,21 @@ template("node_gn_build") {
       defines += [ "HAVE_OPENSSL=1" ]
     } else {
       defines += [ "HAVE_OPENSSL=0" ]
+    }
+    if (node_use_sqlite) {
+      defines += [ "HAVE_SQLITE=1" ]
+    } else {
+      defines += [ "HAVE_SQLITE=0" ]
+    }
+    if (node_use_ffi) {
+      defines += [ "HAVE_FFI=1" ]
+    } else {
+      defines += [ "HAVE_FFI=0" ]
+    }
+    if (node_use_amaro) {
+      defines += [ "HAVE_AMARO=1" ]
+    } else {
+      defines += [ "HAVE_AMARO=0" ]
     }
     if (node_use_v8_platform) {
       defines += [ "NODE_USE_V8_PLATFORM=1" ]
@@ -43,8 +57,6 @@ template("node_gn_build") {
     }
     if (v8_enable_i18n_support) {
       defines += [ "NODE_HAVE_I18N_SUPPORT=1" ]
-    } else {
-      defines += [ "NODE_HAVE_I18N_SUPPORT=0" ]
     }
   }
 
@@ -76,6 +88,8 @@ template("node_gn_build") {
       "-Wno-extra-semi",
       "-Wno-implicit-fallthrough",
       "-Wno-macro-redefined",
+      "-Wno-missing-braces",
+      "-Wno-range-loop-bind-reference",
       "-Wno-return-type",
       "-Wno-shadow",
       "-Wno-sometimes-uninitialized",
@@ -90,7 +104,7 @@ template("node_gn_build") {
       "-Wno-unused-function",
     ]
 
-    if (target_cpu == "x86") {
+    if (current_cpu == "x86") {
       node_arch = "ia32"
     } else {
       node_arch = target_cpu
@@ -147,7 +161,7 @@ template("node_gn_build") {
     public_deps = [
       "deps/ada",
       "deps/uv",
-      "deps/base64",
+      "deps/simdjson",
       "$node_v8_path",
     ]
     deps = [
@@ -156,13 +170,15 @@ template("node_gn_build") {
       "deps/cares",
       "deps/histogram",
       "deps/llhttp",
+      "deps/merve",
+      "deps/nbytes",
       "deps/nghttp2",
       "deps/ngtcp2",
       "deps/postject",
-      "deps/simdjson",
-      "deps/simdutf",
       "deps/uvwasi",
+      "deps/zstd",
       "//third_party/zlib",
+      "$node_simdutf_path",
       "$node_v8_path:v8_libplatform",
     ]
 
@@ -174,24 +190,38 @@ template("node_gn_build") {
       libs = [ "psapi.lib" ]
     }
     if (is_mac) {
-      frameworks = [ "CoreFoundation.framework" ]
+      frameworks = [
+        "CoreFoundation.framework",
+        "Security.framework",
+      ]
+    }
+    if (is_posix) {
+      configs -= [ "//build/config/gcc:symbol_visibility_hidden" ]
+      configs += [ "//build/config/gcc:symbol_visibility_default" ]
     }
 
     if (v8_enable_i18n_support) {
       deps += [ "//third_party/icu" ]
     }
     if (node_use_openssl) {
-      public_deps += [ "deps/openssl" ]
+      deps += [ "deps/ncrypto" ]
+      public_deps += [ "$node_openssl_path" ]
       sources += gypi_values.node_crypto_sources
+    }
+    if (node_use_sqlite) {
+      deps += [ "deps/sqlite" ]
+      sources += gypi_values.node_sqlite_sources
     }
     if (node_enable_inspector) {
       deps += [
+        "$node_inspector_protocol_path:crdtp",
         "src/inspector:node_protocol_generated_sources",
         "src/inspector:v8_inspector_compress_protocol_json",
       ]
       include_dirs = [
         "$target_gen_dir/src",
         "$target_gen_dir/src/inspector",
+        "$node_inspector_protocol_path",
       ]
       node_inspector = exec_script(
           "./tools/gypi_to_gn.py",
@@ -208,7 +238,10 @@ template("node_gn_build") {
     forward_variables_from(invoker, "*")
 
     sources = [ "src/node_main.cc" ]
-    deps = [ ":libnode" ]
+    deps = [
+      ":libnode",
+      "//build/win:default_exe_manifest",
+    ]
     if (node_use_node_snapshot) {
       sources += [ "$target_gen_dir/node_snapshot.cc" ]
       deps += [ ":run_node_mksnapshot" ]
@@ -222,17 +255,43 @@ template("node_gn_build") {
       sources += [ "src/node_snapshot_stub.cc" ]
     }
     output_name = "node"
+
+    if (is_apple) {
+      # Default optimization on apple adds "-dead_strip" to ldflags, which would
+      # strip exported V8 and NAPI symbols, has to remove it to make native
+      # modules work.
+      # There is almost no performance penalty since we are only removing
+      # optimization on the node_main.cc.
+      configs -= [ "//build/config/compiler:default_optimization" ]
+    }
   }
 
   if (node_use_node_snapshot) {
     if (current_toolchain == v8_snapshot_toolchain) {
       executable("node_mksnapshot") {
-        configs += [ ":node_internal_config" ]
+        configs += [ ":node_internal_config", ":disable_icf" ]
         sources = [
           "src/node_snapshot_stub.cc",
           "tools/snapshot/node_mksnapshot.cc",
         ]
         deps = [ ":libnode" ]
+      }
+
+      # This config disables a link time optimization "ICF", which may merge
+      # different functions into one if the function signature and body of them are
+      # identical.
+      #
+      # ICF breaks 1:1 mappings of the external references for V8 snapshot, so we
+      # disable it while taking a V8 snapshot.
+      config("disable_icf") {
+        visibility = [ ":*" ]  # Only targets in this file can depend on this.
+        if (is_win) {
+          ldflags = [ "/OPT:NOICF" ]  # link.exe, but also lld-link.exe.
+        } else if (is_apple && !use_lld) {
+          ldflags = [ "-Wl,-no_deduplicate" ]  # ld64.
+        } else if ((!is_apple && use_gold) || use_lld) {
+          ldflags = [ "-Wl,--icf=none" ]
+        }
       }
     }
 
@@ -254,6 +313,7 @@ template("node_gn_build") {
   }
 
   action("generate_config_gypi") {
+    deps = [ "$node_v8_path:v8_generate_features_json" ]
     script = "tools/generate_config_gypi.py"
     outputs = [ "$target_gen_dir/config.gypi" ]
     depfile = "$target_gen_dir/$target_name.d"
@@ -266,13 +326,18 @@ template("node_gn_build") {
 
   executable("node_js2c") {
     deps = [
-      "deps/simdutf",
       "deps/uv",
+      "$node_simdutf_path",
     ]
     sources = [
       "tools/js2c.cc",
       "tools/executable_wrapper.h",
+      "src/embedded_data.cc",
+      "src/embedded_data.h",
+      "src/builtin_info.cc",
+      "src/builtin_info.h",
     ]
+    include_dirs = [ "src" ]
   }
 
   action("run_node_js2c") {
@@ -320,15 +385,30 @@ template("node_gn_build") {
       ":libnode",
       "deps/googletest",
       "deps/googletest:gtest_main",
-      "deps/simdutf",
+      "deps/nbytes",
+      "$node_simdutf_path",
     ]
 
-    sources = gypi_values.node_cctest_sources
+    sources = [ "src/node_snapshot_stub.cc" ]
+    sources += exec_script("./tools/search_files.py",
+                           [ rebase_path(".", root_build_dir),
+                             rebase_path("test/cctest", root_build_dir),
+                             "cc" ],
+                           "list lines")
+
     if (node_use_openssl) {
-      sources += gypi_values.node_cctest_openssl_sources
+      deps += [ "deps/ncrypto" ]
+    } else {
+      sources -= gypi_values.node_cctest_openssl_sources
     }
     if (node_enable_inspector) {
-      sources += gypi_values.node_cctest_inspector_sources
+      deps += [ "src/inspector:crdtp" ]
+      include_dirs = [
+        "$target_gen_dir/src",
+        "$target_gen_dir/src/inspector",
+      ]
+    } else {
+      sources -= gypi_values.node_cctest_inspector_sources
     }
   }
 
@@ -336,6 +416,7 @@ template("node_gn_build") {
     output_name = "embedtest"
     testonly = true
     deps = [ ":libnode" ]
+    include_dirs = [ "tools" ]
     sources = [
       "src/node_snapshot_stub.cc",
       "test/embedding/embedtest.cc",

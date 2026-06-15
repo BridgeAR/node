@@ -30,7 +30,8 @@
 import hashlib
 md5er = hashlib.md5
 
-
+from contextlib import AbstractContextManager
+import io
 import json
 import multiprocessing
 import optparse
@@ -41,6 +42,7 @@ import re
 import subprocess
 from subprocess import PIPE
 import sys
+import time
 
 from testrunner.local import statusfile
 
@@ -77,11 +79,18 @@ ASSERT_OPTIMIZED_PATTERN = re.compile("assertOptimized")
 FLAGS_ENABLE_MAGLEV = re.compile("//\s*Flags:.*--maglev[^-].*\n")
 FLAGS_ENABLE_TURBOFAN = re.compile("//\s*Flags:.*--turbofan[^-].*\n")
 ASSERT_UNOPTIMIZED_PATTERN = re.compile("assertUnoptimized")
-FLAGS_NO_ALWAYS_OPT = re.compile("//\s*Flags:.*--no-?always-turbofan.*\n")
 
 TOOLS_PATH = dirname(abspath(__file__))
 DEPS_DEPOT_TOOLS_PATH = abspath(
     join(TOOLS_PATH, '..', 'third_party', 'depot_tools'))
+# If the depot_tools don't exist in the V8 directory, we are probably in a
+# chromium checkout, so we can use the depot tools of the chromium checkout.
+if not isdir(DEPS_DEPOT_TOOLS_PATH):
+  DEPS_DEPOT_TOOLS_PATH = abspath(
+      join(TOOLS_PATH, '..', '..', 'third_party', 'depot_tools'))
+
+sys.path.append(DEPS_DEPOT_TOOLS_PATH)
+import rdb_wrapper
 
 
 def CppLintWorker(command):
@@ -113,6 +122,16 @@ def CppLintWorker(command):
     print('Error running cpplint.py. Please make sure you have depot_tools' +
           ' in your third_party directory. Lint check skipped.')
     process.kill()
+
+def ClangFormatWorker(command):
+  try:
+    # Run unchecked to only flag timeouts.
+    subprocess.run(
+        command, stderr=subprocess.PIPE, check=False, timeout=30)
+  except:
+    sys.stdout.write(f'Got a clang-format timeout with {command.pop()}\n')
+    return 1
+  return 0
 
 def TorqueLintWorker(command):
   try:
@@ -428,6 +447,7 @@ class TorqueLintProcessor(CacheableSourceFileProcessor):
 
     return None, arguments
 
+
 class JSLintProcessor(CacheableSourceFileProcessor):
   """
   Check .{m}js file to verify they follow the JS Style guide.
@@ -449,6 +469,49 @@ class JSLintProcessor(CacheableSourceFileProcessor):
   def GetProcessorScript(self):
     jslint = join(DEPS_DEPOT_TOOLS_PATH, 'clang_format.py')
     return jslint, []
+
+
+class ClangFormatProcessor(CacheableSourceFileProcessor):
+  """
+  Check if clang-format runs into timeouts with any files.
+
+  Note, we are not actually enforcing the format as that creates too
+  many differences on config updates.
+  """
+
+  def __init__(self, use_cache=True):
+    super(ClangFormatProcessor, self).__init__(
+      use_cache=use_cache, cache_file_path='.clang-format-cache', file_type='C/C++')
+
+  def IsRelevant(self, name):
+    return name.endswith('.cc') or name.endswith('.h')
+
+  def IgnoreDir(self, name):
+    return (super(ClangFormatProcessor, self).IgnoreDir(name)
+            or (name == 'third_party'))
+
+  # Clang-format is too slow on these files.
+  IGNORE_FORMAT = [
+    'gay-fixed.cc',
+    'gay-precision.cc',
+    'gay-shortest.cc',
+  ]
+
+  def IgnoreFile(self, name):
+    return (super(ClangFormatProcessor, self).IgnoreFile(name)
+              or (name in ClangFormatProcessor.IGNORE_FORMAT))
+
+  def GetPathsToSearch(self):
+    dirs = ['include', 'samples', 'src']
+    test_dirs = ['cctest', 'common', 'fuzzer', 'inspector', 'unittests']
+    return dirs + [join('test', dir) for dir in test_dirs]
+
+  def GetProcessorWorker(self):
+    return ClangFormatWorker
+
+  def GetProcessorScript(self):
+    arguments = ['--fail-on-incomplete-format', '--Werror', '-n']
+    return join(DEPS_DEPOT_TOOLS_PATH, 'clang_format.py'), arguments
 
 
 COPYRIGHT_HEADER_PATTERN = re.compile(
@@ -602,11 +665,6 @@ class SourceProcessor(SourceFileProcessor):
             not FLAGS_ENABLE_TURBOFAN.search(contents):
           print("%s Flag --maglev or --turbofan should be set if " \
                 "assertOptimized() is used" % name)
-          result = False
-        if ASSERT_UNOPTIMIZED_PATTERN.search(contents) and \
-            not FLAGS_NO_ALWAYS_OPT.search(contents):
-          print("%s Flag --no-always-turbofan should be set if " \
-                "assertUnoptimized() is used" % name)
           result = False
 
       match = self.runtime_function_call_pattern.search(contents)
@@ -776,6 +834,8 @@ def FindTests(workspace):
       'tools/ignition/linux_perf_report_test.py',
       'tools/ignition/bytecode_dispatches_report_test.py',
       'tools/ignition/linux_perf_bytecode_annotate_test.py',
+      # TODO(https://crbug.com/430336825): Unskip once bug is resolved.
+      'tools/protoc_wrapper/protoc_wrapper_test.py',
   ]
   scripts_without_excluded = []
   for root, dirs, files in os.walk(join(workspace, 'tools')):
@@ -808,24 +868,69 @@ def GetOptions():
   return result
 
 
+class TeeIO:
+
+  def __init__(self, source, dest):
+    self.source = source
+    self.dest = dest
+
+  def write(self, obj):
+    self.source.write(obj)
+    self.dest.write(obj)
+
+  def flush(self):
+    self.source.flush()
+    self.dest.flush()
+
+
+class TeeOutput(AbstractContextManager):
+
+  def __init__(self, new_target):
+    self._new_target = new_target
+    self.old_out = sys.stdout
+    self.old_err = sys.stderr
+
+  def __enter__(self):
+    sys.stdout = TeeIO(self.old_out, self._new_target)
+    sys.stderr = TeeIO(self.old_err, self._new_target)
+    return self._new_target
+
+  def __exit__(self, exctype, excinst, exctb):
+    sys.stdout = self.old_out
+    sys.stderr = self.old_err
+
+
 def run_checks(checks, workspace):
   failures = []
 
-  def run(check_function, named_object=None):
+  def capture_output(check_function):
+    start_time = time.time()
+    with TeeOutput(io.StringIO()) as f:
+      success = check_function(workspace)
+      return (rdb_wrapper.STATUS_PASS if success else rdb_wrapper.STATUS_FAIL,
+              None if success else f.getvalue()[-1024:],
+              time.time() - start_time)
+
+  def run(check_function, named_object=None, sink=None):
     name = (named_object or check_function).__name__
     print('__________________')
     print(f'Running {name}...')
-    if check_function(workspace):
+    status, output, duration = capture_output(check_function)
+    if status == rdb_wrapper.STATUS_PASS:
       print(f'{name} SUCCEDED')
-      return
-    failures.append(name)
-    print(f'!!! {name} FAILED')
-
-  for check in checks:
-    if callable(check):
-      run(check)
     else:
-      run(check.RunOnPath, check.__class__)
+      failures.append(name)
+      print(f'!!! {name} FAILED')
+    if sink:
+      sink.report(name, status, duration, output)
+
+  with rdb_wrapper.client('v8:full_presubmit/') as sink:
+    for check in checks:
+      if callable(check):
+        run(check, sink=sink)
+      else:
+        run(check.RunOnPath, check.__class__, sink=sink)
+
   return '\n'.join(failures)
 
 
@@ -836,6 +941,7 @@ def Main():
   use_linter_cache = not options.no_linter_cache
   checks = [
     CheckDeps,
+    ClangFormatProcessor(use_cache=use_linter_cache),
     TorqueLintProcessor(use_cache=use_linter_cache),
     JSLintProcessor(use_cache=use_linter_cache),
     SourceProcessor(),

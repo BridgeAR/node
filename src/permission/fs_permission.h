@@ -15,9 +15,14 @@ namespace permission {
 
 class FSPermission final : public PermissionBase {
  public:
-  void Apply(const std::vector<std::string>& allow,
+  void Apply(Environment* env,
+             const std::vector<std::string>& allow,
              PermissionScope scope) override;
-  bool is_granted(PermissionScope perm,
+  void Drop(Environment* env,
+            PermissionScope scope,
+            const std::string_view& param = "") override;
+  bool is_granted(Environment* env,
+                  PermissionScope perm,
                   const std::string_view& param) const override;
 
   struct RadixTree {
@@ -32,24 +37,26 @@ class FSPermission final : public PermissionBase {
 
       Node() : wildcard_child(nullptr), is_leaf(false) {}
 
-      Node* CreateChild(const std::string& prefix) {
-        if (prefix.empty() && !is_leaf) {
+      Node* CreateChild(const std::string& path_prefix) {
+        if (path_prefix.empty() && !is_leaf) {
           is_leaf = true;
           return this;
         }
-        char label = prefix[0];
+
+        CHECK(!path_prefix.empty());
+        char label = path_prefix[0];
 
         Node* child = children[label];
         if (child == nullptr) {
-          children[label] = new Node(prefix);
+          children[label] = new Node(path_prefix);
           return children[label];
         }
 
         // swap prefix
         size_t i = 0;
-        size_t prefix_len = prefix.length();
+        size_t prefix_len = path_prefix.length();
         for (; i < child->prefix.length(); ++i) {
-          if (i > prefix_len || prefix[i] != child->prefix[i]) {
+          if (i > prefix_len || path_prefix[i] != child->prefix[i]) {
             std::string parent_prefix = child->prefix.substr(0, i);
             std::string child_prefix = child->prefix.substr(i);
 
@@ -58,11 +65,11 @@ class FSPermission final : public PermissionBase {
             split_child->children[child_prefix[0]] = child;
             children[parent_prefix[0]] = split_child;
 
-            return split_child->CreateChild(prefix.substr(i));
+            return split_child->CreateChild(path_prefix.substr(i));
           }
         }
         child->is_leaf = true;
-        return child->CreateChild(prefix.substr(i));
+        return child->CreateChild(path_prefix.substr(i));
       }
 
       Node* CreateWildcardChild() {
@@ -76,6 +83,14 @@ class FSPermission final : public PermissionBase {
       Node* NextNode(const std::string& path, size_t idx) const {
         if (idx >= path.length()) {
           return nullptr;
+        }
+
+        // wildcard node takes precedence
+        if (children.size() > 1) {
+          auto it = children.find('*');
+          if (it != children.end()) {
+            return it->second;
+          }
         }
 
         auto it = children.find(path[idx]);
@@ -117,7 +132,7 @@ class FSPermission final : public PermissionBase {
       // ---> er
       // ---> n
       bool IsEndNode() const {
-        if (children.size() == 0) {
+        if (children.empty()) {
           return true;
         }
         return is_leaf;
@@ -127,6 +142,7 @@ class FSPermission final : public PermissionBase {
     RadixTree();
     ~RadixTree();
     void Insert(const std::string& s);
+    void Clear();
     bool Lookup(const std::string_view& s) const { return Lookup(s, false); }
     bool Lookup(const std::string_view& s, bool when_empty_return) const;
 
@@ -136,9 +152,14 @@ class FSPermission final : public PermissionBase {
 
  private:
   void GrantAccess(PermissionScope scope, const std::string& param);
+  void RevokeAccess(PermissionScope scope, const std::string& param);
+  void RebuildTree(PermissionScope scope);
   // fs granted on startup
   RadixTree granted_in_fs_;
   RadixTree granted_out_fs_;
+
+  std::vector<std::string> granted_paths_in_;
+  std::vector<std::string> granted_paths_out_;
 
   bool deny_all_in_ = true;
   bool deny_all_out_ = true;

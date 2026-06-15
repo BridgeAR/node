@@ -189,9 +189,7 @@ $ make install
 To build with [CMake][]:
 
 ```bash
-$ mkdir -p build
-
-$ (cd build && cmake .. -DBUILD_TESTING=ON) # generate project with tests
+$ cmake -B build -DBUILD_TESTING=ON         # generate project with tests
 $ cmake --build build                       # add `-j <n>` with cmake >= 3.12
 
 # Run tests:
@@ -217,7 +215,7 @@ $ cmake ../..                 \
 $ brew install --HEAD libuv
 ```
 
-Note to OS X users:
+Note to macOS users:
 
 Make sure that you specify the architecture you wish to build for in the
 "ARCHS" flag. You can specify more than one by delimiting with a space
@@ -231,6 +229,18 @@ $ ./bootstrap-vcpkg.bat # for powershell
 $ ./bootstrap-vcpkg.sh # for bash
 $ ./vcpkg install libuv
 ```
+
+### Install with Conan
+
+You can install pre-built binaries for libuv or build it from source using [Conan](https://conan.io/). Use the following command:
+
+```bash
+conan install --requires="libuv/[*]" --build=missing
+```
+
+The libuv Conan recipe is kept up to date by Conan maintainers and community contributors.
+If the version is out of date, please [create an issue or pull request](https://github.com/conan-io/conan-center-index) on the ConanCenterIndex repository.
+
 
 ### Running tests
 

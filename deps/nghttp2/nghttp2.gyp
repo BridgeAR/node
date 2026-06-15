@@ -13,7 +13,7 @@
       'lib/nghttp2_http.c',
       'lib/nghttp2_map.c',
       'lib/nghttp2_mem.c',
-      'lib/nghttp2_npn.c',
+      'lib/nghttp2_alpn.c',
       'lib/nghttp2_option.c',
       'lib/nghttp2_outbound_item.c',
       'lib/nghttp2_pq.c',
@@ -67,6 +67,17 @@
       'sources': [
         '<@(nghttp2_sources)',
       ]
+    },
+    {
+      'target_name': 'sfparse',
+      'type': 'static_library',
+      'include_dirs': ['lib'],
+      'sources': [
+        'lib/sfparse.c',
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [ 'lib/includes' ]
+      }
     }
   ]
 }

@@ -46,7 +46,7 @@ class Variable final : public ZoneObject {
     DCHECK(!(mode == VariableMode::kVar &&
              initialization_flag == kNeedsInitialization));
     DCHECK_IMPLIES(is_static_flag == IsStaticFlag::kStatic,
-                   IsConstVariableMode(mode));
+                   IsImmutableLexicalOrPrivateVariableMode(mode));
   }
 
   explicit Variable(Variable* other);
@@ -92,7 +92,9 @@ class Variable final : public ZoneObject {
     bit_field_ = MaybeAssignedFlagField::update(bit_field_, kNotAssigned);
   }
   void SetMaybeAssigned() {
-    if (mode() == VariableMode::kConst) return;
+    if (IsImmutableLexicalVariableMode(mode())) {
+      return;
+    }
     // Private names are only initialized once by us.
     if (name_->IsPrivateName()) {
       return;
@@ -105,8 +107,9 @@ class Variable final : public ZoneObject {
       if (!maybe_assigned()) {
         local_if_not_shadowed()->SetMaybeAssigned();
       }
-      DCHECK_IMPLIES(local_if_not_shadowed()->mode() != VariableMode::kConst,
-                     local_if_not_shadowed()->maybe_assigned());
+      DCHECK_IMPLIES(
+          (!IsImmutableLexicalVariableMode(local_if_not_shadowed()->mode())),
+          local_if_not_shadowed()->maybe_assigned());
     }
     set_maybe_assigned();
   }
@@ -303,6 +306,9 @@ class Variable final : public ZoneObject {
     bit_field_ = VariableModeField::update(bit_field_, VariableMode::kLet);
     bit_field_ =
         InitializationFlagField::update(bit_field_, kNeedsInitialization);
+    // It's possible a parameter hasn't been used but when we introduce
+    // temporaries, it will be used in the initialization block.
+    set_is_used();
   }
 
   static InitializationFlag DefaultInitializationFlag(VariableMode mode) {

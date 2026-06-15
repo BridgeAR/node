@@ -9,10 +9,14 @@ bitfield struct JSArrayBufferFlags extends uint32 {
   is_asm_js_memory: bool: 1 bit;
   is_shared: bool: 1 bit;
   is_resizable_by_js: bool: 1 bit;
+  is_immutable: bool: 1 bit;
 }
 
-extern class JSArrayBuffer extends JSObjectWithEmbedderSlots {
-  detach_key: Object;
+const kNoView: Smi = 0;
+const kManyViews: Smi = 1;
+
+extern class JSArrayBuffer extends JSAPIObjectWithEmbedderSlots {
+  views_or_detach_key: Weak<JSArrayBufferView>|Smi|Cell;
   // A BoundedSize if the sandbox is enabled
   raw_byte_length: uintptr;
   // A BoundedSize if the sandbox is enabled
@@ -49,6 +53,11 @@ macro IsResizableArrayBuffer(buffer: JSArrayBuffer): bool {
   return buffer.bit_field.is_resizable_by_js;
 }
 
+@export
+macro IsImmutableArrayBuffer(buffer: JSArrayBuffer): bool {
+  return buffer.bit_field.is_immutable;
+}
+
 // We have 4 different DataViews & TypedArrays:
 // 1) Normal (backed by AB / SAB) or non-length tracking backed by GSAB (can't
 // go oob once constructed)
@@ -61,16 +70,14 @@ bitfield struct JSArrayBufferViewFlags extends uint32 {
 }
 
 @abstract
-extern class JSArrayBufferView extends JSObjectWithEmbedderSlots {
+extern class JSArrayBufferView extends JSAPIObjectWithEmbedderSlots {
   buffer: JSArrayBuffer;
+  bit_field: JSArrayBufferViewFlags;  // 32bit
+  @if(TAGGED_SIZE_8_BYTES) optional_padding: uint32;
   // A BoundedSize if the sandbox is enabled
   raw_byte_offset: uintptr;
   // A BoundedSize if the sandbox is enabled
   raw_byte_length: uintptr;
-  bit_field: JSArrayBufferViewFlags;
-  // Pads header size to be a multiple of kTaggedSize.
-  @if(TAGGED_SIZE_8_BYTES) optional_padding: uint32;
-  @ifnot(TAGGED_SIZE_8_BYTES) optional_padding: void;
 }
 
 extern operator '.byte_offset' macro LoadJSArrayBufferViewByteOffset(
@@ -93,13 +100,15 @@ macro IsLengthTrackingJSArrayBufferView(array: JSArrayBufferView): bool {
 }
 
 extern macro LoadVariableLengthJSArrayBufferViewByteLength(
-    JSArrayBufferView, JSArrayBuffer): uintptr labels DetachedOrOutOfBounds;
+    JSArrayBufferView, JSArrayBuffer, constexpr TypedArrayAccessMode): uintptr
+    labels Fail;
 
 macro LoadJSArrayBufferViewByteLength(
     view: JSArrayBufferView,
     buffer: JSArrayBuffer): uintptr labels DetachedOrOutOfBounds {
   if (IsVariableLengthJSArrayBufferView(view)) {
-    return LoadVariableLengthJSArrayBufferViewByteLength(view, buffer)
+    return LoadVariableLengthJSArrayBufferViewByteLength(
+        view, buffer, TypedArrayAccessMode::kRead)
         otherwise DetachedOrOutOfBounds;
   }
   if (IsDetachedBuffer(buffer)) goto DetachedOrOutOfBounds;
@@ -114,9 +123,12 @@ extern class JSTypedArray extends JSArrayBufferView {
   base_pointer: ByteArray|Smi;
 }
 
+// A typed array where the ArrayBuffer is guaranteed to be detached. Note, the
+// inverse does not hold! A normal JSTypedArray can still have a detached
+// buffer.
+extern class JSDetachedTypedArray extends JSTypedArray {}
+
 extern operator '.length' macro LoadJSTypedArrayLength(JSTypedArray): uintptr;
-extern operator '.length=' macro StoreJSTypedArrayLength(
-    JSTypedArray, uintptr): void;
 
 @export
 macro IsOnHeapTypedArray(array: JSTypedArray): bool {
@@ -155,6 +167,9 @@ extern class Uint32TypedArrayConstructor extends TypedArrayConstructor
     generates 'TNode<JSFunction>';
 @doNotGenerateCast
 extern class Int32TypedArrayConstructor extends TypedArrayConstructor
+    generates 'TNode<JSFunction>';
+@doNotGenerateCast
+extern class Float16TypedArrayConstructor extends TypedArrayConstructor
     generates 'TNode<JSFunction>';
 @doNotGenerateCast
 extern class Float32TypedArrayConstructor extends TypedArrayConstructor

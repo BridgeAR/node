@@ -24,7 +24,20 @@ var registeredAlgorithmNames = [
     "Ed25519",
     "Ed448",
     "X25519",
-    "X448"
+    "X448",
+    "ML-DSA-44",
+    "ML-DSA-65",
+    "ML-DSA-87",
+    "ML-KEM-512",
+    "ML-KEM-768",
+    "ML-KEM-1024",
+    "ChaCha20-Poly1305",
+    "Argon2i",
+    "Argon2d",
+    "Argon2id",
+    "AES-OCB",
+    "KMAC128",
+    "KMAC256",
 ];
 
 
@@ -71,28 +84,15 @@ function objectToString(obj) {
     } else {
         return obj.toString();
     }
-
-    var keyValuePairs = [];
-
-    Object.keys(obj).sort().forEach(function(keyName) {
-        var value = obj[keyName];
-        if (typeof value === "object") {
-            value = objectToString(value);
-        } else if (typeof value === "array") {
-            value = "[" + value.map(function(elem){return objectToString(elem);}).join(", ") + "]";
-        } else {
-            value = value.toString();
-        }
-
-        keyValuePairs.push(keyName + ": " + value);
-    });
-
-    return "{" + keyValuePairs.join(", ") + "}";
 }
 
 // Is key a CryptoKey object with correct algorithm, extractable, and usages?
 // Is it a secret, private, or public kind of key?
 function assert_goodCryptoKey(key, algorithm, extractable, usages, kind) {
+    if (typeof algorithm === "string") {
+        algorithm = { name: algorithm };
+    }
+
     var correctUsages = [];
 
     var registeredAlgorithmName;
@@ -120,6 +120,15 @@ function assert_goodCryptoKey(key, algorithm, extractable, usages, kind) {
             default:
                 assert_unreached("Unrecognized hash");
         }
+    } else if (key.algorithm.name.toUpperCase().startsWith("KMAC") && algorithm.length === undefined) {
+        switch (key.algorithm.name.toUpperCase()) {
+            case 'KMAC128':
+                assert_equals(key.algorithm.length, 128, "Correct length");
+                break;
+            case 'KMAC256':
+                assert_equals(key.algorithm.length, 256, "Correct length");
+                break;
+        }
     } else {
         assert_equals(key.algorithm.length, algorithm.length, "Correct length");
     }
@@ -135,13 +144,13 @@ function assert_goodCryptoKey(key, algorithm, extractable, usages, kind) {
     // only a single key. The publicKey and privateKey portions of a key pair
     // recognize only some of the usages appropriate for a key pair.
     if (key.type === "public") {
-        ["encrypt", "verify", "wrapKey"].forEach(function(usage) {
+        ["encrypt", "verify", "wrapKey", "encapsulateBits", "encapsulateKey"].forEach(function(usage) {
             if (usages.includes(usage)) {
                 correctUsages.push(usage);
             }
         });
     } else if (key.type === "private") {
-        ["decrypt", "sign", "unwrapKey", "deriveKey", "deriveBits"].forEach(function(usage) {
+        ["decrypt", "sign", "unwrapKey", "deriveKey", "deriveBits", "decapsulateBits", "decapsulateKey"].forEach(function(usage) {
             if (usages.includes(usage)) {
                 correctUsages.push(usage);
             }
@@ -202,7 +211,16 @@ function allAlgorithmSpecifiersFor(algorithmName) {
         curves.forEach(function(curveName) {
             results.push({name: algorithmName, namedCurve: curveName});
         });
-    } else if (algorithmName.toUpperCase().substring(0, 1) === "X" || algorithmName.toUpperCase().substring(0, 2) === "ED") {
+    } else if (algorithmName.toUpperCase().startsWith("KMAC")) {
+        [
+            {length: 128},
+            {length: 160},
+            {length: 256},
+        ].forEach(function(hashAlgorithm) {
+            results.push({name: algorithmName, ...hashAlgorithm});
+        });
+    } else {
+        results.push(algorithmName);
         results.push({ name: algorithmName });
     }
 
@@ -258,4 +276,118 @@ function allNameVariants(name, slowTest) {
     // returning one variation
     if (slowTest) return [mixedCaseName];
     return unique([upCaseName, lowCaseName, mixedCaseName]);
+}
+
+// Builds a hex string representation for an array-like input.
+// "bytes" can be an Array of bytes, an ArrayBuffer, or any TypedArray.
+// The output looks like this:
+//    ab034c99
+function bytesToHexString(bytes)
+{
+    if (!bytes)
+        return null;
+
+    bytes = new Uint8Array(bytes);
+    var hexBytes = [];
+
+    for (var i = 0; i < bytes.length; ++i) {
+        var byteString = bytes[i].toString(16);
+        if (byteString.length < 2)
+            byteString = "0" + byteString;
+        hexBytes.push(byteString);
+    }
+
+    return hexBytes.join("");
+}
+
+function hexStringToUint8Array(hexString)
+{
+    if (hexString.length % 2 != 0)
+        throw "Invalid hexString";
+    var arrayBuffer = new Uint8Array(hexString.length / 2);
+
+    for (var i = 0; i < hexString.length; i += 2) {
+        var byteValue = parseInt(hexString.substr(i, 2), 16);
+        if (byteValue == NaN)
+            throw "Invalid hexString";
+        arrayBuffer[i/2] = byteValue;
+    }
+
+    return arrayBuffer;
+}
+
+// Compares two ArrayBuffer or ArrayBufferView objects. If bitCount is
+// omitted, the two values must be the same length and have the same contents
+// in every byte. If bitCount is included, only that leading number of bits
+// have to match.
+function equalBuffers(a, b, bitCount) {
+    var remainder;
+
+    if (typeof bitCount === "undefined" && a.byteLength !== b.byteLength) {
+        return false;
+    }
+
+    var aBytes = new Uint8Array(a);
+    var bBytes = new Uint8Array(b);
+
+    var length = a.byteLength;
+    if (typeof bitCount !== "undefined") {
+        length = Math.floor(bitCount / 8);
+    }
+
+    for (var i=0; i<length; i++) {
+        if (aBytes[i] !== bBytes[i]) {
+            return false;
+        }
+    }
+
+    if (typeof bitCount !== "undefined") {
+        remainder = bitCount % 8;
+        return aBytes[length] >> (8 - remainder) === bBytes[length] >> (8 - remainder);
+    }
+
+    return true;
+}
+
+// Returns a copy of the sourceBuffer it is sent.
+function copyBuffer(sourceBuffer) {
+    var source = new Uint8Array(sourceBuffer);
+    var copy = new Uint8Array(sourceBuffer.byteLength)
+
+    for (var i=0; i<source.byteLength; i++) {
+        copy[i] = source[i];
+    }
+
+    return copy;
+}
+
+// Are two Jwk objects "the same"? That is, does the object returned include
+// matching values for each property that was expected? It's okay if the
+// returned object has extra methods; they aren't checked.
+function equalJwk(expected, got) {
+    var fields = Object.keys(expected);
+    var fieldName;
+
+    for(var i=0; i<fields.length; i++) {
+        fieldName = fields[i];
+        if (!(fieldName in got)) {
+            return false;
+        }
+        if (objectToString(expected[fieldName]) !== objectToString(got[fieldName])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Jwk format wants Base 64 without the typical padding at the end.
+function byteArrayToUnpaddedBase64(byteArray){
+    var binaryString = "";
+    for (var i=0; i<byteArray.byteLength; i++){
+        binaryString += String.fromCharCode(byteArray[i]);
+    }
+    var base64String = btoa(binaryString);
+
+    return base64String.replace(/=/g, "");
 }
